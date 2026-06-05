@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'port_scanner.dart';
 import 'settings_screen.dart';
+import 'dns_editor_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
@@ -557,8 +558,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   leading: const Icon(Icons.dashboard, color: Color(0xFFF6821F)),
                   title: const Text('Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
                   selected: true,
+                  tileColor: const Color(0xFF1E293B),
                   selectedTileColor: const Color(0xFF0F172A),
                   onTap: () {},
+                ),
+                ListTile(
+                  leading: const Icon(Icons.dns, color: Colors.grey),
+                  title: const Text('DNS Editor', style: TextStyle(color: Colors.grey)),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen())),
                 ),
                 ListTile(
                   leading: const Icon(Icons.settings, color: Colors.grey),

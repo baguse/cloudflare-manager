@@ -64,6 +64,114 @@ class CloudflareService {
     return [];
   }
 
+  static Future<List<Map<String, dynamic>>> listDnsRecords(String zoneId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$baseUrl/zones/$zoneId/dns_records?per_page=100'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true) {
+          return List<Map<String, dynamic>>.from(data['result']);
+        }
+      }
+    } catch (e) {
+      print('Error listing DNS records: $e');
+    }
+    return [];
+  }
+
+  static Future<bool> createDnsRecord(
+    String zoneId, {
+    required String type,
+    required String name,
+    required String content,
+    int ttl = 1,
+    bool? proxied,
+    int? priority,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final body = <String, dynamic>{
+        'type': type,
+        'name': name,
+        'content': content,
+        'ttl': ttl,
+      };
+      if (proxied != null && (type == 'A' || type == 'AAAA' || type == 'CNAME')) {
+        body['proxied'] = proxied;
+      }
+      if (priority != null && type == 'MX') {
+        body['priority'] = priority;
+      }
+      final response = await http.post(
+        Uri.parse('$baseUrl/zones/$zoneId/dns_records'),
+        headers: headers,
+        body: json.encode(body),
+      );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = json.decode(response.body);
+        return data['success'] == true;
+      }
+    } catch (e) {
+      print('Error creating DNS record: $e');
+    }
+    return false;
+  }
+
+  static Future<bool> updateDnsRecord(
+    String zoneId,
+    String recordId, {
+    String? type,
+    String? name,
+    String? content,
+    int? ttl,
+    bool? proxied,
+    int? priority,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final body = <String, dynamic>{};
+      if (type != null) body['type'] = type;
+      if (name != null) body['name'] = name;
+      if (content != null) body['content'] = content;
+      if (ttl != null) body['ttl'] = ttl;
+      if (proxied != null) body['proxied'] = proxied;
+      if (priority != null) body['priority'] = priority;
+      final response = await http.put(
+        Uri.parse('$baseUrl/zones/$zoneId/dns_records/$recordId'),
+        headers: headers,
+        body: json.encode(body),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['success'] == true;
+      }
+    } catch (e) {
+      print('Error updating DNS record: $e');
+    }
+    return false;
+  }
+
+  static Future<bool> deleteDnsRecord(String zoneId, String recordId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.delete(
+        Uri.parse('$baseUrl/zones/$zoneId/dns_records/$recordId'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['success'] == true;
+      }
+    } catch (e) {
+      print('Error deleting DNS record: $e');
+    }
+    return false;
+  }
+
   // List all tunnels for the account
   static Future<List<Map<String, dynamic>>> listTunnels() async {
     try {
