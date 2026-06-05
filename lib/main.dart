@@ -9,6 +9,7 @@ import 'dns_editor_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
+import 'latency_sparkline.dart';
 import 'tunnel_watcher.dart';
 import 'http_inspector.dart';
 import 'har_exporter.dart';
@@ -65,6 +66,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<int, String> _pidToTunnelLabel = {};
   List<TunnelInfo> _runningTunnels = [];
   Map<String, TunnelHealth> _tunnelHealth = {};
+  final Map<String, List<int>> _tunnelHealthHistory = {};
   bool _isCheckingHealth = false;
   HttpInspector? _inspector;
   StreamSubscription<CapturedRequest>? _inspectorSub;
@@ -239,9 +241,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) {
       setState(() {
         _tunnelHealth = results;
+        for (final entry in results.entries) {
+          final sample = entry.value.isReachable ? entry.value.latencyMs : -1;
+          final history = _tunnelHealthHistory.putIfAbsent(entry.key, () => <int>[]);
+          history.add(sample);
+          if (history.length > 30) {
+            history.removeRange(0, history.length - 30);
+          }
+        }
         _isCheckingHealth = false;
       });
     }
+  }
+
+  List<int> _getHealthHistory(String url) {
+    final history = _tunnelHealthHistory[url];
+    if (history != null && history.isNotEmpty) return history;
+    final current = _tunnelHealth[url];
+    if (current != null) {
+      final sample = current.isReachable ? current.latencyMs : -1;
+      return <int>[sample];
+    }
+    return <int>[];
   }
 
   void _toggleWatcher() {
@@ -1871,6 +1892,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     if (health != null) ...[
                       const SizedBox(width: 8),
                       _buildHealthDot(health),
+                      const SizedBox(width: 6),
+                      LatencySparkline(
+                        samples: _getHealthHistory(copyUrl),
+                      ),
                     ] else if (_isCheckingHealth) ...[
                       const SizedBox(width: 8),
                       const SizedBox(
