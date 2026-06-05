@@ -8,8 +8,10 @@ import 'settings_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
+import 'http_inspector.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:brotli/brotli.dart';
 
 void main() {
   runApp(const CloudflareManagerApp());
@@ -61,6 +63,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<TunnelInfo> _runningTunnels = [];
   Map<String, TunnelHealth> _tunnelHealth = {};
   bool _isCheckingHealth = false;
+  HttpInspector? _inspector;
+  StreamSubscription<CapturedRequest>? _inspectorSub;
   bool _isLoadingPorts = true;
   bool _isLoadingRemoteTunnels = false;
   bool _isCloudflaredInstalled = false;
@@ -78,6 +82,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _checkCloudflared();
     _fetchPorts();
     _fetchRemoteTunnels();
+    _restoreInspector();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchPorts();
       _fetchRemoteTunnels();
@@ -103,6 +108,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     _healthTimer?.cancel();
+    _inspectorSub?.cancel();
+    _inspector?.stop();
     _portsSearchController.dispose();
     _tunnelsSearchController.dispose();
     super.dispose();
@@ -259,7 +266,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _showToast('Starting cloudflared...', isInfo: true);
       final process = await CloudflaredService.startTokenTunnel(tunnelToken);
 
-      await CloudflaredService.registerAppTunnel(tunnelId, port);
+      await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken);
 
       final activeTunnel = ActiveTunnel(
         tunnelId: tunnelId,
@@ -329,6 +336,139 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
     return result ?? false;
+  }
+
+  Future<void> _startInspector(OpenPort localService) async {
+    if (_inspector != null) {
+      _showToast('Inspector is already running on port ${_inspector!.listenPort}', isInfo: true);
+      return;
+    }
+    final result = await showDialog<Map<String, int>>(
+      context: context,
+      builder: (context) => InspectorConfigDialog(service: localService),
+    );
+    if (result == null) return;
+    final listenPort = result['listen']!;
+    final targetPort = result['target']!;
+    if (listenPort == localService.port) {
+      _showToast('Inspector port must differ from the service port', isError: true);
+      return;
+    }
+    try {
+      final inspector = HttpInspector(listenPort: listenPort, targetPort: targetPort);
+      await inspector.start();
+      final sub = inspector.onRequest.listen((_) {
+        if (mounted) setState(() {});
+      });
+      if (mounted) {
+        setState(() {
+          _inspector = inspector;
+          _inspectorSub = sub;
+        });
+      }
+      await CloudflaredService.saveInspectorConfig(listenPort, targetPort);
+      _showToast('Inspector listening on :$listenPort → :$targetPort', isInfo: true);
+    } catch (e) {
+      _showToast('Failed to start inspector: $e', isError: true);
+    }
+  }
+
+  Future<void> _stopInspector() async {
+    await _inspectorSub?.cancel();
+    _inspectorSub = null;
+    await _inspector?.stop();
+    await CloudflaredService.clearInspectorConfig();
+    if (mounted) setState(() => _inspector = null);
+    _showToast('Inspector stopped', isInfo: true);
+  }
+
+  void _clearInspectorLogs() {
+    _inspector?.clear();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _bindExistingTunnel(String tunnelId) async {
+    if (!_isCloudflaredInstalled) {
+      _showToast('cloudflared is not installed!', isError: true);
+      return;
+    }
+    final token = await CloudflaredService.readAppTunnelToken(tunnelId);
+    if (token == null) {
+      _showToast('No stored token for this tunnel. Create it from the app first.', isError: true);
+      return;
+    }
+    final cfg = _tunnelConfigs[tunnelId];
+    final hostname = cfg?['hostname'];
+    if (hostname == null || hostname.isEmpty) {
+      _showToast('Tunnel has no hostname configured.', isError: true);
+      return;
+    }
+    final port = await showDialog<int>(
+      context: context,
+      builder: (context) => BindPortDialog(
+        tunnelConfigs: _tunnelConfigs,
+        tunnelId: tunnelId,
+        openPorts: _openPorts,
+      ),
+    );
+    if (port == null) return;
+
+    try {
+      _showToast('Reconfiguring tunnel...', isInfo: true);
+      final ok = await CloudflareService.configureTunnel(tunnelId, hostname, port);
+      if (!ok) throw Exception('Failed to reconfigure tunnel');
+
+      _showToast('Starting cloudflared...', isInfo: true);
+      final process = await CloudflaredService.startTokenTunnel(token);
+      await CloudflaredService.registerAppTunnel(tunnelId, port, token: token);
+
+      final activeTunnel = ActiveTunnel(
+        tunnelId: tunnelId,
+        name: 'tunnel-$hostname',
+        localPort: port,
+        url: 'https://$hostname',
+        process: process,
+        logs: ValueNotifier<List<String>>([]),
+      );
+
+      setState(() {
+        _activeTunnels.add(activeTunnel);
+      });
+
+      process.stdout.transform(utf8.decoder).listen((data) {
+        activeTunnel.logs.value = [...activeTunnel.logs.value, data];
+      });
+      process.stderr.transform(utf8.decoder).listen((data) {
+        activeTunnel.logs.value = [...activeTunnel.logs.value, data];
+      });
+
+      _showToast('Tunnel https://$hostname → :$port is active!');
+      _fetchRemoteTunnels();
+      _checkTunnelHealth();
+    } catch (e) {
+      _showToast('Bind failed: $e', isError: true);
+    }
+  }
+
+  Future<void> _restoreInspector() async {
+    final cfg = await CloudflaredService.readInspectorConfig();
+    if (cfg == null) return;
+    try {
+      final inspector = HttpInspector(listenPort: cfg.listen, targetPort: cfg.target);
+      await inspector.start();
+      final sub = inspector.onRequest.listen((_) {
+        if (mounted) setState(() {});
+      });
+      if (mounted) {
+        setState(() {
+          _inspector = inspector;
+          _inspectorSub = sub;
+        });
+        _showToast('Inspector restored on :${cfg.listen} → :${cfg.target}', isInfo: true);
+      }
+    } catch (e) {
+      await CloudflaredService.clearInspectorConfig();
+    }
   }
 
   Future<void> _deleteTunnel({ActiveTunnel? tunnel, String? tunnelId, int? pid}) async {
@@ -560,6 +700,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
+                  if (_inspector != null) ...[
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 280,
+                      child: _buildInspectorPanel(),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -687,19 +834,492 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-          ElevatedButton(
-            onPressed: isTunneled ? null : () => _startTunnel(portInfo.port),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF6821F),
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: const Color(0xFF334155),
-              disabledForegroundColor: Colors.grey,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: Text(isTunneled ? 'Linked' : 'Bind'),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Start HTTP Inspector',
+                icon: Icon(
+                  _inspector != null ? Icons.visibility : Icons.visibility_outlined,
+                  size: 20,
+                  color: _inspector != null ? const Color(0xFFF6821F) : Colors.grey,
+                ),
+                onPressed: isTunneled ? null : () => _startInspector(portInfo),
+              ),
+              const SizedBox(width: 4),
+              ElevatedButton(
+                onPressed: isTunneled ? null : () => _startTunnel(portInfo.port),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF6821F),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFF334155),
+                  disabledForegroundColor: Colors.grey,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: Text(isTunneled ? 'Linked' : 'Bind'),
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildInspectorPanel() {
+    final inspector = _inspector!;
+    final requests = inspector.requests;
+    return Card(
+      color: const Color(0xFF1E293B),
+      elevation: 8,
+      shadowColor: Colors.black45,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.visibility, color: Color(0xFFF6821F), size: 20),
+                const SizedBox(width: 12),
+                const Text('Request Inspector', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'localhost:${inspector.listenPort} → localhost:${inspector.targetPort}',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.green.withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    '${requests.length} REQ',
+                    style: const TextStyle(fontSize: 10, color: Colors.greenAccent, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: 'http://localhost:${inspector.listenPort}'));
+                    _showToast('Inspector URL copied', isInfo: true);
+                  },
+                  icon: const Icon(Icons.copy, size: 14, color: Colors.grey),
+                  label: const Text('Copy', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                ),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: requests.isEmpty ? null : _clearInspectorLogs,
+                  icon: const Icon(Icons.cleaning_services, size: 16, color: Colors.grey),
+                  label: const Text('Clear', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                ),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _stopInspector,
+                  icon: const Icon(Icons.stop_circle, size: 16, color: Colors.redAccent),
+                  label: const Text('Stop', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFF334155)),
+          Expanded(
+            child: requests.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No requests captured yet. Hit localhost:PORT in your browser or curl it.',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: requests.length,
+                    separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 1),
+                    itemBuilder: (context, i) => _buildCapturedRequestRow(requests[requests.length - 1 - i]),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCapturedRequestRow(CapturedRequest r) {
+    final time = '${r.timestamp.hour.toString().padLeft(2, '0')}:${r.timestamp.minute.toString().padLeft(2, '0')}:${r.timestamp.second.toString().padLeft(2, '0')}';
+    final Color statusColor;
+    if (!r.completed) {
+      statusColor = Colors.grey;
+    } else if (r.error != null) {
+      statusColor = Colors.redAccent;
+    } else if (r.statusCode != null && r.statusCode! >= 500) {
+      statusColor = Colors.redAccent;
+    } else if (r.statusCode != null && r.statusCode! >= 400) {
+      statusColor = Colors.orangeAccent;
+    } else if (r.statusCode != null && r.statusCode! >= 300) {
+      statusColor = Colors.lightBlueAccent;
+    } else {
+      statusColor = Colors.greenAccent;
+    }
+    final contentType = _contentType(r.responseHeaders);
+    return InkWell(
+      onTap: () => _showRequestDetailDialog(r),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 70,
+              child: Text(time, style: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace')),
+            ),
+            SizedBox(
+              width: 50,
+              child: Text(
+                r.completed ? '${r.statusCode ?? (r.error != null ? 'ERR' : '…')}' : '…',
+                style: TextStyle(fontSize: 12, color: statusColor, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 50,
+              child: Text(
+                r.method,
+                style: const TextStyle(fontSize: 11, color: Color(0xFFF6821F), fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                r.path,
+                style: const TextStyle(fontSize: 12, color: Colors.white70, fontFamily: 'monospace'),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (contentType != null) ...[
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFF334155)),
+                  ),
+                  child: Text(
+                    contentType,
+                    style: const TextStyle(fontSize: 9, color: Colors.white60, fontFamily: 'monospace'),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 60,
+              child: Text(
+                r.completed ? '${r.latencyMs ?? 0} ms' : '...',
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 11, color: r.latencyMs != null && r.latencyMs! > 500 ? Colors.orangeAccent : Colors.grey, fontFamily: 'monospace'),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right, size: 16, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String? _contentType(Map<String, List<String>>? headers) {
+    if (headers == null) return null;
+    String? raw;
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == 'content-type' && entry.value.isNotEmpty) {
+        raw = entry.value.first;
+        break;
+      }
+    }
+    if (raw == null) return null;
+    final mime = raw.split(';').first.trim();
+    if (mime.isEmpty) return null;
+    return mime;
+  }
+
+  String? _contentEncodingFromHeaders(Map<String, List<String>>? headers) {
+    if (headers == null) return null;
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == 'content-encoding' && entry.value.isNotEmpty) {
+        return entry.value.first;
+      }
+    }
+    return null;
+  }
+
+  String? _contentTypeFromHeaders(Map<String, List<String>>? headers) {
+    if (headers == null) return null;
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == 'content-type' && entry.value.isNotEmpty) {
+        return entry.value.first.split(';').first.trim();
+      }
+    }
+    return null;
+  }
+
+  void _showRequestDetailDialog(CapturedRequest r) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 700,
+          height: 500,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('${r.method} ', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFF6821F), fontFamily: 'monospace')),
+                  Expanded(
+                    child: Text(
+                      r.path,
+                      style: const TextStyle(fontSize: 14, color: Colors.white, fontFamily: 'monospace'),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (r.statusCode != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: (r.statusCode! >= 400 ? Colors.redAccent : Colors.greenAccent).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text('${r.statusCode}', style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                ],
+              ),
+              const Divider(color: Color(0xFF334155)),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildDetailSection('Request headers', r.requestHeaders),
+                      if (r.requestBody != null) ...[
+                        const SizedBox(height: 12),
+                        _buildBodyDetail('Request body', r.requestBody!),
+                      ],
+                      if (r.responseHeaders != null) ...[
+                        const SizedBox(height: 12),
+                        _buildDetailSection('Response headers', r.responseHeaders!),
+                      ],
+                      if (r.responseBody != null) ...[
+                        const SizedBox(height: 12),
+                        _buildBodyDetail(
+                          'Response body',
+                          r.responseBody!,
+                          contentEncoding: _contentEncodingFromHeaders(r.responseHeaders),
+                          contentType: _contentTypeFromHeaders(r.responseHeaders),
+                        ),
+                      ],
+                      if (r.error != null) ...[
+                        const SizedBox(height: 12),
+                        _buildSimpleDetail('Error', r.error!),
+                      ],
+                      const SizedBox(height: 12),
+                      Text(
+                        'Latency: ${r.latencyMs ?? '—'} ms  ·  ${r.timestamp.toIso8601String()}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 11, fontFamily: 'monospace'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSimpleDetail(String title, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 12, color: Color(0xFFF6821F), fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(value, style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace')),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBodyDetail(String title, CapturedBody body, {String? contentEncoding, String? contentType}) {
+    final enc = contentEncoding?.toLowerCase().trim();
+    final mime = contentType?.toLowerCase().trim();
+    final isImage = mime != null && mime.startsWith('image/');
+
+    String? displayText;
+    if (enc == 'gzip' || enc == 'deflate' || enc == 'x-gzip') {
+      try {
+        final codec = (enc == 'deflate') ? ZLibCodec() : GZipCodec();
+        final decompressed = codec.decoder.convert(body.bytes);
+        displayText = utf8.decode(decompressed, allowMalformed: true);
+      } catch (e) {
+        displayText = '[decompress failed: $e]';
+      }
+    } else if (enc == 'br') {
+      try {
+        final decompressed = brotliDecode(body.bytes);
+        displayText = utf8.decode(decompressed, allowMalformed: true);
+      } catch (e) {
+        displayText = '[decompress failed: $e]';
+      }
+    } else if (!isImage) {
+      displayText = body.text;
+    }
+
+    final isJson = displayText != null && (displayText.trimLeft().startsWith('{') || displayText.trimLeft().startsWith('['));
+    final pretty = isJson ? _tryPrettyJson(displayText) : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(title, style: const TextStyle(fontSize: 12, color: Color(0xFFF6821F), fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            Text(
+              body.truncated
+                  ? '${body.totalBytes} bytes (truncated, showing first ${body.bytes.length})'
+                  : '${body.totalBytes} bytes',
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+            if (mime != null) ...[
+              const SizedBox(width: 8),
+              Text(mime, style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: 'monospace')),
+            ],
+          ],
+        ),
+        const SizedBox(height: 4),
+        if (isImage) ...[
+          Container(
+            constraints: const BoxConstraints(maxHeight: 320),
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.memory(
+                Uint8List.fromList(body.bytes),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stack) => Text(
+                  'Image failed to render: $error',
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 11),
+                ),
+              ),
+            ),
+          ),
+          if (displayText != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                'Raw bytes (first 200): ${body.bytes.take(200).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+                style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: 'monospace'),
+              ),
+            ),
+          ],
+        ] else ...[
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 300),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.vertical,
+                child: SelectableText(
+                  pretty ?? displayText ?? body.text,
+                  style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace', height: 1.4),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  String? _tryPrettyJson(String text) {
+    try {
+      final decoded = json.decode(text);
+      return const JsonEncoder.withIndent('  ').convert(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _buildDetailSection(String title, Map<String, List<String>> headers) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 12, color: Color(0xFFF6821F), fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: headers.entries.expand((entry) {
+              return entry.value.map((v) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white70),
+                    children: [
+                      TextSpan(text: '${entry.key}: ', style: const TextStyle(color: Color(0xFFF6821F))),
+                      TextSpan(text: v),
+                    ],
+                  ),
+                ),
+              ));
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -791,22 +1411,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
           pid: detectedPid > 0 ? detectedPid : null,
           url: hostname.isNotEmpty ? 'https://$hostname' : null,
         ));
-      } else if (hasActiveConnections) {
-        items.add(_buildTunnelRow(
-          tunnelId: tunnelId,
-          title: hostname.isNotEmpty ? 'https://$hostname' : name,
-          subtitle: '$service  •  Connected (${connections.length} conns)',
-          isLocal: false,
-          isConnected: true,
-        ));
       } else {
-        items.add(_buildTunnelRow(
-          tunnelId: tunnelId,
-          title: hostname.isNotEmpty ? hostname : name,
-          subtitle: service.isNotEmpty ? '$service  •  Inactive' : 'Inactive',
-          isLocal: false,
-          isConnected: false,
-        ));
+        renderedTunnelIds.add(tunnelId);
+        if (hasActiveConnections) {
+          items.add(_buildTunnelRow(
+            tunnelId: tunnelId,
+            title: hostname.isNotEmpty ? 'https://$hostname' : name,
+            subtitle: '$service  •  Connected (${connections.length} conns)',
+            isLocal: false,
+            isConnected: true,
+          ));
+        } else {
+          items.add(_buildTunnelRow(
+            tunnelId: tunnelId,
+            title: hostname.isNotEmpty ? hostname : name,
+            subtitle: service.isNotEmpty ? '$service  •  Inactive' : 'Inactive',
+            isLocal: false,
+            isConnected: false,
+            onBind: hostname.isNotEmpty ? () => _bindExistingTunnel(tunnelId) : null,
+          ));
+        }
       }
     }
 
@@ -817,6 +1441,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
 
+      renderedPids.add(a.process.pid);
       items.add(_buildTunnelRow(
         tunnelId: null,
         title: a.url,
@@ -925,7 +1550,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return parts.join('  •  ');
   }
 
-  Widget _buildTunnelRow({String? tunnelId, required String title, required String subtitle, required bool isLocal, bool isConnected = false, ActiveTunnel? tunnel, int? pid, String? url}) {
+  Widget _buildTunnelRow({String? tunnelId, required String title, required String subtitle, required bool isLocal, bool isConnected = false, ActiveTunnel? tunnel, int? pid, String? url, VoidCallback? onBind}) {
     final Color borderColor = isLocal
         ? Colors.green.withOpacity(0.5)
         : isConnected
@@ -1066,6 +1691,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               tooltip: 'Show QR Code',
               onPressed: () => _showQrDialog(copyUrl),
             ),
+            if (onBind != null)
+              TextButton.icon(
+                icon: const Icon(Icons.link, size: 16, color: Color(0xFFF6821F)),
+                label: const Text('Bind', style: TextStyle(color: Color(0xFFF6821F), fontSize: 12)),
+                onPressed: onBind,
+              ),
             IconButton(
               icon: const Icon(Icons.delete_outline, size: 24, color: Colors.redAccent),
               tooltip: 'Delete from Cloudflare',
@@ -1285,6 +1916,240 @@ class BindDomainDialog extends StatefulWidget {
 
   @override
   State<BindDomainDialog> createState() => _BindDomainDialogState();
+}
+
+class InspectorConfigDialog extends StatefulWidget {
+  final OpenPort service;
+  const InspectorConfigDialog({super.key, required this.service});
+
+  @override
+  State<InspectorConfigDialog> createState() => _InspectorConfigDialogState();
+}
+
+class _InspectorConfigDialogState extends State<InspectorConfigDialog> {
+  late final TextEditingController _listenController;
+  late final TextEditingController _targetController;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenController = TextEditingController(text: '${widget.service.port + 1}');
+    _targetController = TextEditingController(text: '${widget.service.port}');
+  }
+
+  @override
+  void dispose() {
+    _listenController.dispose();
+    _targetController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.visibility, color: Color(0xFFF6821F)),
+          SizedBox(width: 8),
+          Text('Start HTTP Inspector', style: TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Service on :${widget.service.port} (${widget.service.processName}) will be moved to a different port. The inspector will proxy between the two.',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _listenController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Inspector listen port',
+              filled: true,
+              fillColor: Color(0xFF0F172A),
+              border: OutlineInputBorder(borderSide: BorderSide.none),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _targetController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Upstream port (your real service)',
+              filled: true,
+              fillColor: Color(0xFF0F172A),
+              border: OutlineInputBorder(borderSide: BorderSide.none),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'Workflow: 1) stop the service on :PORT, 2) restart it on the upstream port, 3) click Bind on :INSPECTOR_PORT, 4) all tunneled traffic will be logged here.',
+              style: TextStyle(color: Colors.grey, fontSize: 11),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final listen = int.tryParse(_listenController.text.trim());
+            final target = int.tryParse(_targetController.text.trim());
+            if (listen == null || target == null || listen <= 0 || target <= 0) {
+              return;
+            }
+            Navigator.pop(context, {'listen': listen, 'target': target});
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFF6821F),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: const Text('Start Inspector'),
+        ),
+      ],
+    );
+  }
+}
+
+class BindPortDialog extends StatefulWidget {
+  final Map<String, Map<String, String>> tunnelConfigs;
+  final String tunnelId;
+  final List<OpenPort> openPorts;
+
+  const BindPortDialog({
+    super.key,
+    required this.tunnelConfigs,
+    required this.tunnelId,
+    required this.openPorts,
+  });
+
+  @override
+  State<BindPortDialog> createState() => _BindPortDialogState();
+}
+
+class _BindPortDialogState extends State<BindPortDialog> {
+  late int _selectedPort;
+  final TextEditingController _portController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.tunnelConfigs[widget.tunnelId];
+    final service = existing?['service'] ?? '';
+    final match = RegExp(r'localhost:(\d+)').firstMatch(service);
+    _selectedPort = match != null ? int.parse(match.group(1)!) : (widget.openPorts.isNotEmpty ? widget.openPorts.first.port : 8080);
+    _portController.text = '$_selectedPort';
+  }
+
+  @override
+  void dispose() {
+    _portController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cfg = widget.tunnelConfigs[widget.tunnelId];
+    final hostname = cfg?['hostname'] ?? widget.tunnelId.substring(0, 8);
+    final fullDomain = hostname.contains('.') ? hostname : 'https://$hostname';
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          const Icon(Icons.link, color: Color(0xFFF6821F)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Bind $fullDomain → local port', style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Reconfigures the tunnel to point at a local port, then starts cloudflared. Existing DNS stays as-is.',
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          if (widget.openPorts.isNotEmpty) ...[
+            const Text('Quick pick from listening ports:', style: TextStyle(color: Colors.grey, fontSize: 11)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: widget.openPorts.map((p) {
+                final selected = p.port == _selectedPort;
+                return ChoiceChip(
+                  label: Text('${p.port}  ·  ${p.processName}', style: const TextStyle(fontSize: 11)),
+                  selected: selected,
+                  selectedColor: const Color(0xFFF6821F).withOpacity(0.3),
+                  backgroundColor: const Color(0xFF0F172A),
+                  side: BorderSide(color: selected ? const Color(0xFFF6821F) : const Color(0xFF334155)),
+                  onSelected: (_) {
+                    setState(() {
+                      _selectedPort = p.port;
+                      _portController.text = '${p.port}';
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+          ],
+          TextField(
+            controller: _portController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Port',
+              filled: true,
+              fillColor: Color(0xFF0F172A),
+              border: OutlineInputBorder(borderSide: BorderSide.none),
+            ),
+            onChanged: (v) {
+              final p = int.tryParse(v);
+              if (p != null) _selectedPort = p;
+            },
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final p = int.tryParse(_portController.text.trim());
+            if (p == null || p <= 0 || p > 65535) return;
+            Navigator.pop(context, p);
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFF6821F),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: const Text('Bind'),
+        ),
+      ],
+    );
+  }
 }
 
 class _BindDomainDialogState extends State<BindDomainDialog> {

@@ -166,19 +166,49 @@ class CloudflaredService {
       final content = await file.readAsString();
       final data = json.decode(content);
       if (data is Map) {
-        return data.map((k, v) => MapEntry(k.toString(), (v as num).toInt()));
+        final out = <String, int>{};
+        data.forEach((k, v) {
+          if (v is num) {
+            out[k.toString()] = v.toInt();
+          } else if (v is Map && v['port'] is num) {
+            out[k.toString()] = (v['port'] as num).toInt();
+          }
+        });
+        return out;
       }
     } catch (e) {
     }
     return {};
   }
 
-  static Future<void> registerAppTunnel(String tunnelId, int localPort) async {
+  static Future<String?> readAppTunnelToken(String tunnelId) async {
+    final file = _appTunnelMapFile();
+    if (file == null) return null;
+    try {
+      if (!await file.exists()) return null;
+      final data = json.decode(await file.readAsString());
+      if (data is Map && data[tunnelId] is Map) {
+        final token = data[tunnelId]['token'];
+        if (token is String) return token;
+      }
+    } catch (e) {
+    }
+    return null;
+  }
+
+  static Future<void> registerAppTunnel(String tunnelId, int localPort, {String? token}) async {
     final file = _appTunnelMapFile();
     if (file == null) return;
-    final map = await readAppTunnelPortMap();
-    map[tunnelId] = localPort;
     try {
+      final content = await file.exists() ? await file.readAsString() : '{}';
+      final data = json.decode(content);
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final existing = map[tunnelId];
+      final String? existingToken = existing is Map ? existing['token'] as String? : null;
+      map[tunnelId] = {
+        'port': localPort,
+        if (token != null) 'token': token else if (existingToken != null) 'token': existingToken,
+      };
       await file.parent.create(recursive: true);
       await file.writeAsString(json.encode(map));
     } catch (e) {
@@ -195,6 +225,46 @@ class CloudflaredService {
         await file.writeAsString(json.encode(map));
       } catch (e) {
       }
+    }
+  }
+
+  static File? _inspectorConfigFile() {
+    final home = Platform.environment['HOME'];
+    if (home == null) return null;
+    return File('$home/.cloudflared/app-inspector.json');
+  }
+
+  static Future<void> saveInspectorConfig(int listenPort, int targetPort) async {
+    final file = _inspectorConfigFile();
+    if (file == null) return;
+    try {
+      await file.parent.create(recursive: true);
+      await file.writeAsString(json.encode({'listen': listenPort, 'target': targetPort}));
+    } catch (e) {
+      print('Error saving inspector config: $e');
+    }
+  }
+
+  static Future<({int listen, int target})?> readInspectorConfig() async {
+    final file = _inspectorConfigFile();
+    if (file == null) return null;
+    try {
+      if (!await file.exists()) return null;
+      final data = json.decode(await file.readAsString());
+      if (data is Map && data['listen'] is num && data['target'] is num) {
+        return (listen: (data['listen'] as num).toInt(), target: (data['target'] as num).toInt());
+      }
+    } catch (e) {
+    }
+    return null;
+  }
+
+  static Future<void> clearInspectorConfig() async {
+    final file = _inspectorConfigFile();
+    if (file == null) return;
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (e) {
     }
   }
 
