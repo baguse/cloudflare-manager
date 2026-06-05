@@ -9,6 +9,7 @@ import 'dns_editor_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
+import 'tunnel_watcher.dart';
 import 'http_inspector.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -66,6 +67,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isCheckingHealth = false;
   HttpInspector? _inspector;
   StreamSubscription<CapturedRequest>? _inspectorSub;
+  final TunnelWatcher _watcher = TunnelWatcher();
+  StreamSubscription<WatcherEvent>? _watcherSub;
   bool _isLoadingPorts = true;
   bool _isLoadingRemoteTunnels = false;
   bool _isCloudflaredInstalled = false;
@@ -82,8 +85,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _checkCloudflared();
     _fetchPorts();
-    _fetchRemoteTunnels();
     _restoreInspector();
+    _bootstrap();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchPorts();
       _fetchRemoteTunnels();
@@ -100,6 +103,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  Future<void> _bootstrap() async {
+    await _fetchRemoteTunnels();
+    await _restoreWatchedTunnels();
+    _watcherSub = _watcher.events.listen(_onWatcherEvent);
+    _watcher.start();
+  }
+
   Future<void> _checkCloudflared() async {
     final isInstalled = await CloudflaredService.isInstalled();
     if (mounted) setState(() => _isCloudflaredInstalled = isInstalled);
@@ -109,6 +119,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     _healthTimer?.cancel();
+    _watcherSub?.cancel();
+    _watcher.stop();
     _inspectorSub?.cancel();
     _inspector?.stop();
     _portsSearchController.dispose();
@@ -231,6 +243,81 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _toggleWatcher() {
+    setState(() {
+      _watcher.setEnabled(!_watcher.isEnabled);
+    });
+    _showToast(
+      _watcher.isEnabled ? 'Watcher enabled' : 'Watcher disabled',
+      isInfo: true,
+    );
+  }
+
+  Future<void> _restoreWatchedTunnels() async {
+    final appMap = await CloudflaredService.readAppTunnelPortMapFull();
+    final runningTunnels = await CloudflaredService.getRunningTunnels();
+    for (final entry in appMap.entries) {
+      final tunnelId = entry.key;
+      final port = entry.value.port;
+      final token = entry.value.token;
+      if (token == null) continue;
+
+      final cfg = _tunnelConfigs[tunnelId];
+      final hostname = cfg?['hostname'];
+      if (hostname == null || hostname.isEmpty) {
+        await CloudflaredService.unregisterAppTunnel(tunnelId);
+        continue;
+      }
+
+      final existsRemotely = _remoteTunnels.any((t) => t['id'] == tunnelId);
+      if (!existsRemotely) {
+        await CloudflaredService.unregisterAppTunnel(tunnelId);
+        continue;
+      }
+
+      final match = runningTunnels.where((t) => t.tunnelId == tunnelId).toList();
+      if (match.isEmpty) {
+        continue;
+      }
+      final pid = match.first.pid;
+      _watcher.watch(
+        tunnelId: tunnelId,
+        port: port,
+        hostname: hostname,
+        token: token,
+        currentPid: pid,
+      );
+    }
+  }
+
+  void _onWatcherEvent(WatcherEvent event) {
+    if (!mounted) return;
+    final newProcess = event.newProcess;
+    if (newProcess != null) {
+      final id = event.tunnelId;
+      final idx = _activeTunnels.indexWhere((t) => t.tunnelId == id);
+      if (idx >= 0) {
+        _activeTunnels[idx].replaceProcess(newProcess);
+        newProcess.stdout.transform(utf8.decoder).listen((data) {
+          _activeTunnels[idx].logs.value = [..._activeTunnels[idx].logs.value, data];
+        });
+        newProcess.stderr.transform(utf8.decoder).listen((data) {
+          _activeTunnels[idx].logs.value = [..._activeTunnels[idx].logs.value, data];
+        });
+      }
+    }
+    if (event.status == TunnelWatcherStatus.reconnecting) {
+      _showToast('Tunnel reconnecting…', isInfo: true);
+    } else if (event.status == TunnelWatcherStatus.crashLoop) {
+      _showToast('Tunnel crash loop — check configuration', isError: true);
+    } else if (event.status == TunnelWatcherStatus.lostNoToken) {
+      _showToast('Tunnel died — no stored token to respawn', isError: true);
+    } else if (event.newProcess != null) {
+      _showToast('Tunnel reconnected', isInfo: true);
+    }
+    setState(() {});
+  }
+
   Future<void> _startTunnel(int port) async {
     if (!_isCloudflaredInstalled) {
       _showToast('cloudflared is not installed!', isError: true);
@@ -268,6 +355,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final process = await CloudflaredService.startTokenTunnel(tunnelToken);
 
       await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken);
+      _watcher.watch(
+        tunnelId: tunnelId,
+        port: port,
+        hostname: fullDomain,
+        token: tunnelToken,
+        currentPid: process.pid,
+      );
 
       final activeTunnel = ActiveTunnel(
         tunnelId: tunnelId,
@@ -301,7 +395,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _stopTunnel(ActiveTunnel tunnel) {
     tunnel.process.kill();
     if (tunnel.tunnelId != null) {
-      CloudflaredService.unregisterAppTunnel(tunnel.tunnelId!);
+      _watcher.unwatch(tunnel.tunnelId!);
     }
     setState(() => _activeTunnels.remove(tunnel));
     _showToast('Tunnel stopped', isInfo: true);
@@ -443,6 +537,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         activeTunnel.logs.value = [...activeTunnel.logs.value, data];
       });
 
+      _watcher.watch(
+        tunnelId: tunnelId,
+        port: port,
+        hostname: hostname,
+        token: token,
+        currentPid: process.pid,
+      );
+
       _showToast('Tunnel https://$hostname → :$port is active!');
       _fetchRemoteTunnels();
       _checkTunnelHealth();
@@ -489,6 +591,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     await CloudflaredService.unregisterAppTunnel(id);
+    _watcher.unwatch(id);
     await CloudflareService.deleteTunnelDnsRecords(id);
     final success = await CloudflareService.deleteTunnel(id);
     if (success) {
@@ -571,6 +674,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   leading: const Icon(Icons.settings, color: Colors.grey),
                   title: const Text('Settings', style: TextStyle(color: Colors.grey)),
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                ),
+                ListTile(
+                  leading: Icon(
+                    _watcher.isEnabled ? Icons.visibility : Icons.visibility_off,
+                    color: _watcher.isEnabled ? const Color(0xFFF6821F) : Colors.grey,
+                  ),
+                  title: Text(
+                    'Watcher: ${_watcher.isEnabled ? "ON" : "OFF"} (${_watcher.watched.length})',
+                    style: TextStyle(color: _watcher.isEnabled ? const Color(0xFFF6821F) : Colors.grey),
+                  ),
+                  onTap: _toggleWatcher,
                 ),
                 ListTile(
                   leading: const Icon(Icons.bug_report, color: Colors.redAccent),
@@ -1398,6 +1512,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           isLocal: true,
           isConnected: true,
           tunnel: local,
+          watcherStatus: _watcher.watched[tunnelId]?.status,
         ));
       } else if (localProcess != null) {
         renderedTunnelIds.add(tunnelId);
@@ -1481,20 +1596,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (t.tunnelId != null) renderedTunnelIds.add(t.tunnelId!);
 
       final proc = _pidToLocalProcess[t.pid];
-      final title = _pidToTunnelLabel[t.pid] ?? 'https://...';
-      items.add(_buildTunnelRow(
-        tunnelId: t.tunnelId,
-        title: title,
-        subtitle: _composeSubtitle(
-          service: '',
-          status: t.isQuickTunnel ? 'Quick Tunnel (external)' : 'Running externally',
-          external: proc,
-          fallbackPort: port,
-        ),
-        isLocal: true,
-        isConnected: true,
-        pid: t.pid,
-      ));
+      final label = _pidToTunnelLabel[t.pid];
+      if (label == null) {
+        items.add(_buildOrphanProcessRow(t, port, proc));
+      } else {
+        items.add(_buildTunnelRow(
+          tunnelId: t.tunnelId,
+          title: label,
+          subtitle: _composeSubtitle(
+            service: '',
+            status: t.isQuickTunnel ? 'Quick Tunnel (external)' : 'Running externally',
+            external: proc,
+            fallbackPort: port,
+          ),
+          isLocal: true,
+          isConnected: true,
+          pid: t.pid,
+        ));
+      }
     }
 
     return items;
@@ -1531,6 +1650,108 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildOrphanProcessRow(TunnelInfo t, int port, OpenPort? proc) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        border: Border.all(color: Colors.grey.withOpacity(0.5)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.help_outline, color: Colors.grey, size: 28),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Orphan cloudflared process',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white70),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.grey.withOpacity(0.4)),
+                      ),
+                      child: const Text('NO TUNNEL', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'localhost:$port · pid ${t.pid} · started outside this app and not in your Cloudflare account',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.stop_circle, size: 28, color: Colors.redAccent),
+            tooltip: 'Kill process',
+            onPressed: () async {
+              try {
+                Process.killPid(t.pid);
+                _showToast('Killed cloudflared (pid ${t.pid})', isInfo: true);
+                _fetchRemoteTunnels();
+              } catch (e) {
+                _showToast('Failed to kill: $e', isError: true);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWatcherChip(TunnelWatcherStatus status) {
+    final String label;
+    final Color color;
+    switch (status) {
+      case TunnelWatcherStatus.watching:
+        label = 'WATCHING';
+        color = Colors.greenAccent;
+        break;
+      case TunnelWatcherStatus.reconnecting:
+        label = 'RECONNECTING';
+        color = Colors.orangeAccent;
+        break;
+      case TunnelWatcherStatus.crashLoop:
+        label = 'CRASH LOOP';
+        color = Colors.redAccent;
+        break;
+      case TunnelWatcherStatus.lostNoToken:
+        label = 'NO TOKEN';
+        color = Colors.grey;
+        break;
+    }
+    return Tooltip(
+      message: 'Auto-reconnect: ${label.toLowerCase()}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withOpacity(0.4)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
   String _composeSubtitle({
     required String service,
     required String status,
@@ -1557,7 +1778,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return parts.join('  •  ');
   }
 
-  Widget _buildTunnelRow({String? tunnelId, required String title, required String subtitle, required bool isLocal, bool isConnected = false, ActiveTunnel? tunnel, int? pid, String? url, VoidCallback? onBind}) {
+  Widget _buildTunnelRow({String? tunnelId, required String title, required String subtitle, required bool isLocal, bool isConnected = false, ActiveTunnel? tunnel, int? pid, String? url, VoidCallback? onBind, TunnelWatcherStatus? watcherStatus}) {
     final Color borderColor = isLocal
         ? Colors.green.withOpacity(0.5)
         : isConnected
@@ -1616,6 +1837,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         height: 10,
                         child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.grey),
                       ),
+                    ],
+                    if (watcherStatus != null) ...[
+                      const SizedBox(width: 8),
+                      _buildWatcherChip(watcherStatus),
                     ],
                   ],
                 ),
@@ -1904,7 +2129,7 @@ class ActiveTunnel {
   final String? name;
   final int localPort;
   String url;
-  final Process process;
+  Process process;
   final ValueNotifier<List<String>> logs;
 
   ActiveTunnel({
@@ -1915,6 +2140,10 @@ class ActiveTunnel {
     required this.process,
     required this.logs,
   });
+
+  void replaceProcess(Process newProcess) {
+    process = newProcess;
+  }
 }
 
 class BindDomainDialog extends StatefulWidget {
