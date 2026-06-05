@@ -26,7 +26,7 @@ class CapturedRequest {
   final String method;
   final String path;
   final Map<String, List<String>> requestHeaders;
-  final int? requestBodySize;
+  int? requestBodySize;
   CapturedBody? requestBody;
   int? statusCode;
   Map<String, List<String>>? responseHeaders;
@@ -43,6 +43,12 @@ class CapturedRequest {
     required this.requestHeaders,
     this.requestBodySize,
   });
+}
+
+class _TeeResult {
+  final CapturedBody? body;
+  final int totalBytes;
+  _TeeResult(this.body, this.totalBytes);
 }
 
 class HttpInspector {
@@ -88,13 +94,12 @@ class HttpInspector {
 
   Future<void> _handle(HttpRequest req) async {
     final start = DateTime.now();
-    final bodySize = req.contentLength;
     final captured = CapturedRequest(
       timestamp: start,
       method: req.method,
       path: req.uri.path + (req.uri.query.isEmpty ? '' : '?${req.uri.query}'),
       requestHeaders: _copyHeaders(req.headers),
-      requestBodySize: bodySize >= 0 ? bodySize : null,
+      requestBodySize: req.contentLength,
     );
     _requests.add(captured);
     _requestsController.add(captured);
@@ -117,22 +122,13 @@ class HttpInspector {
         }
       });
 
-      final reqBody = await _drainBody(req);
-      captured.requestBody = reqBody;
-      if (reqBody != null) {
-        forward.add(reqBody.bytes);
-      }
+      final reqTee = await _teeStream(req, forward);
+      captured.requestBody = reqTee.body;
+      captured.requestBodySize = reqTee.totalBytes > 0 ? reqTee.totalBytes : null;
 
       final response = await forward.close().timeout(const Duration(seconds: 4));
       captured.statusCode = response.statusCode;
       captured.responseHeaders = _copyHeaders(response.headers);
-      captured.responseBodySize = response.contentLength < 0 ? null : response.contentLength;
-      captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
-
-      final respBody = await _drainBody(response);
-      captured.responseBody = respBody;
-      captured.completed = true;
-      _requestsController.add(captured);
 
       req.response.statusCode = response.statusCode;
       response.headers.forEach((name, values) {
@@ -141,9 +137,13 @@ class HttpInspector {
           req.response.headers.add(name, v);
         }
       });
-      if (respBody != null) {
-        req.response.add(respBody.bytes);
-      }
+
+      final respTee = await _teeStream(response, req.response);
+      captured.responseBody = respTee.body;
+      captured.responseBodySize = respTee.totalBytes > 0 ? respTee.totalBytes : null;
+      captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
+      captured.completed = true;
+      _requestsController.add(captured);
       await req.response.close();
     } on TimeoutException {
       captured.error = 'Upstream timeout (>4s)';
@@ -171,12 +171,13 @@ class HttpInspector {
     }
   }
 
-  Future<CapturedBody?> _drainBody(Stream<List<int>> source) async {
+  Future<_TeeResult> _teeStream(Stream<List<int>> source, IOSink destination) async {
     final buffer = <int>[];
     int total = 0;
     bool truncated = false;
     await for (final chunk in source) {
       total += chunk.length;
+      destination.add(chunk);
       if (buffer.length < _maxBodyBytes) {
         final remaining = _maxBodyBytes - buffer.length;
         if (chunk.length <= remaining) {
@@ -189,8 +190,11 @@ class HttpInspector {
         truncated = true;
       }
     }
-    if (total == 0) return null;
-    return CapturedBody(bytes: buffer, truncated: truncated, totalBytes: total);
+    if (total == 0) return _TeeResult(null, 0);
+    return _TeeResult(
+      CapturedBody(bytes: buffer, truncated: truncated, totalBytes: total),
+      total,
+    );
   }
 
   Map<String, List<String>> _copyHeaders(HttpHeaders headers) {
