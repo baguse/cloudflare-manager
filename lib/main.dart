@@ -8,6 +8,8 @@ import 'settings_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const CloudflareManagerApp());
@@ -1000,6 +1002,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               },
             ),
             IconButton(
+              icon: const Icon(Icons.qr_code, size: 20, color: Colors.grey),
+              tooltip: 'Show QR Code',
+              onPressed: () => _showQrDialog(copyUrl),
+            ),
+            IconButton(
               icon: const Icon(Icons.terminal, size: 20, color: Colors.grey),
               tooltip: 'View Logs',
               onPressed: () => _showLogsDialog(tunnel),
@@ -1022,6 +1029,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Clipboard.setData(ClipboardData(text: copyUrl));
                 _showToast('URL copied to clipboard!', isInfo: true);
               },
+            ),
+            IconButton(
+              icon: const Icon(Icons.qr_code, size: 20, color: Colors.grey),
+              tooltip: 'Show QR Code',
+              onPressed: () => _showQrDialog(copyUrl),
             ),
             IconButton(
               icon: const Icon(Icons.terminal, size: 20, color: Colors.grey,
@@ -1050,6 +1062,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
           ] else if (!isLocal && tunnelId != null) ...[
             IconButton(
+              icon: const Icon(Icons.qr_code, size: 20, color: Colors.grey),
+              tooltip: 'Show QR Code',
+              onPressed: () => _showQrDialog(copyUrl),
+            ),
+            IconButton(
               icon: const Icon(Icons.delete_outline, size: 24, color: Colors.redAccent),
               tooltip: 'Delete from Cloudflare',
               onPressed: () => _deleteRemoteTunnel(tunnelId),
@@ -1057,6 +1074,116 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ]
         ],
       ),
+    );
+  }
+
+  void _showQrDialog(String url) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: 340,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.qr_code_2, color: Color(0xFFF6821F)),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Scan to open',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: QrImageView(
+                    data: url,
+                    version: QrVersions.auto,
+                    size: 240,
+                    backgroundColor: Colors.white,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Color(0xFF0F172A),
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Color(0xFF0F172A),
+                    ),
+                    errorStateBuilder: (context, err) => Container(
+                      width: 240,
+                      height: 240,
+                      alignment: Alignment.center,
+                      child: Text('QR error: $err', style: const TextStyle(color: Colors.red)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SelectableText(
+                  url,
+                  style: const TextStyle(fontSize: 12, color: Colors.white70, fontFamily: 'monospace'),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.copy, size: 16, color: Colors.white70),
+                      label: const Text('Copy URL', style: TextStyle(color: Colors.white70)),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: url));
+                        _showToast('URL copied to clipboard!', isInfo: true);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      icon: const Icon(Icons.open_in_new, size: 16, color: Color(0xFFF6821F)),
+                      label: const Text('Open', style: TextStyle(color: Color(0xFFF6821F))),
+                      onPressed: () async {
+                        final uri = Uri.parse(url);
+                        var launched = false;
+                        try {
+                          launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        } catch (e) {
+                          launched = false;
+                        }
+                        if (!launched && Platform.isLinux) {
+                          try {
+                            final result = await Process.run('xdg-open', [url]);
+                            launched = result.exitCode == 0;
+                          } catch (e) {
+                            launched = false;
+                          }
+                        }
+                        if (!launched) {
+                          _showToast('Could not open browser. Install xdg-utils.', isError: true);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
