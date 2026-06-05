@@ -13,7 +13,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _storage = const FlutterSecureStorage();
   final _tokenController = TextEditingController();
   final _accountIdController = TextEditingController();
+  final _minPortController = TextEditingController();
+  final _maxPortController = TextEditingController();
   bool _isLoading = false;
+  int? _autoBindMinPort;
+  int? _autoBindMaxPort;
 
   @override
   void initState() {
@@ -25,10 +29,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isLoading = true);
     final token = await _storage.read(key: CloudflareService.tokenKey);
     final accountId = await _storage.read(key: CloudflareService.accountIdKey);
-    
+    final min = await _storage.read(key: 'auto_bind_min_port');
+    final max = await _storage.read(key: 'auto_bind_max_port');
+
     if (token != null) _tokenController.text = token;
     if (accountId != null) _accountIdController.text = accountId;
-    
+    if (min != null) {
+      _autoBindMinPort = int.tryParse(min);
+      _minPortController.text = min;
+    }
+    if (max != null) {
+      _autoBindMaxPort = int.tryParse(max);
+      _maxPortController.text = max;
+    }
+
     setState(() => _isLoading = false);
   }
 
@@ -36,28 +50,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isLoading = true);
     await _storage.write(key: CloudflareService.tokenKey, value: _tokenController.text.trim());
     await _storage.write(key: CloudflareService.accountIdKey, value: _accountIdController.text.trim());
-    
-    // Test connection
+    await _savePortRange();
+
     final error = await CloudflareService.verifyToken();
-    
+
     setState(() => _isLoading = false);
-    
+
     if (mounted) {
+      final messenger = ScaffoldMessenger.of(context);
       if (error == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Settings saved and verified!'), backgroundColor: Colors.green),
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Settings saved and verified!'),
+            backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: '✕',
+              textColor: Colors.white70,
+              onPressed: () => messenger.hideCurrentSnackBar(),
+            ),
+          ),
         );
         Navigator.pop(context);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(
             content: Text('Error: $error'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: '✕',
+              textColor: Colors.white70,
+              onPressed: () => messenger.hideCurrentSnackBar(),
+            ),
           ),
         );
       }
     }
+  }
+
+  Future<void> _savePortRange() async {
+    if (_autoBindMinPort != null) {
+      await _storage.write(key: 'auto_bind_min_port', value: _autoBindMinPort.toString());
+    } else {
+      await _storage.delete(key: 'auto_bind_min_port');
+    }
+    if (_autoBindMaxPort != null) {
+      await _storage.write(key: 'auto_bind_max_port', value: _autoBindMaxPort.toString());
+    } else {
+      await _storage.delete(key: 'auto_bind_max_port');
+    }
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    _accountIdController.dispose();
+    _minPortController.dispose();
+    _maxPortController.dispose();
+    super.dispose();
   }
 
   @override
@@ -70,8 +120,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: ListView(
                 children: [
                   const Text('Enter your Cloudflare API credentials to manage tunnels.'),
                   const SizedBox(height: 20),
@@ -91,7 +140,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 32),
+                  const Text('Auto-bind port range',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Only show detection toast for new services within this port range. Leave empty to detect all ports.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _minPortController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Min port',
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (v) {
+                            _autoBindMinPort = int.tryParse(v);
+                          },
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('–', style: TextStyle(fontSize: 18, color: Colors.grey)),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _maxPortController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Max port',
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (v) {
+                            _autoBindMaxPort = int.tryParse(v);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -99,7 +190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: _saveSettings,
                       child: const Text('Save & Verify'),
                     ),
-                  )
+                  ),
                 ],
               ),
             ),

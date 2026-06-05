@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -77,6 +78,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isCloudflaredInstalled = false;
   Timer? _refreshTimer;
   Timer? _healthTimer;
+  Set<int> _previousPorts = {};
+  int? _autoBindMinPort;
+  int? _autoBindMaxPort;
+  final _secureStorage = const FlutterSecureStorage();
 
   final _portsSearchController = TextEditingController();
   final _tunnelsSearchController = TextEditingController();
@@ -90,6 +95,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _fetchPorts();
     _restoreInspector();
     _bootstrap();
+    _loadPortRange();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchPorts();
       _fetchRemoteTunnels();
@@ -133,12 +139,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _fetchPorts() async {
     final ports = await PortScanner.getOpenPorts();
-    if (mounted) {
-      setState(() {
-        _openPorts = ports;
-        _isLoadingPorts = false;
-      });
+    if (!mounted) return;
+
+    final currentPorts = ports.map((p) => p.port).toSet();
+    if (_previousPorts.isNotEmpty) {
+      final newPorts = currentPorts.difference(_previousPorts);
+      for (final port in newPorts) {
+        final openPort = ports.where((p) => p.port == port).firstOrNull;
+        _offerBind(port, openPort);
+      }
     }
+    _previousPorts = currentPorts;
+
+    setState(() {
+      _openPorts = ports;
+      _isLoadingPorts = false;
+    });
   }
 
   Future<void> _fetchRemoteTunnels() async {
@@ -685,13 +701,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _loadPortRange() async {
+    final min = await _secureStorage.read(key: 'auto_bind_min_port');
+    final max = await _secureStorage.read(key: 'auto_bind_max_port');
+    if (min != null) _autoBindMinPort = int.tryParse(min);
+    if (max != null) _autoBindMaxPort = int.tryParse(max);
+  }
+
+  bool _isPortAllowed(int port) {
+    if (_autoBindMinPort != null && port < _autoBindMinPort!) return false;
+    if (_autoBindMaxPort != null && port > _autoBindMaxPort!) return false;
+    return true;
+  }
+
+  void _offerBind(int port, OpenPort? openPort) {
+    if (_tunnelLabelForPort(port) != null) return;
+    if (!_isPortAllowed(port)) return;
+    final label = openPort?.processName ?? 'port $port';
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Detected new service: $label on :$port',
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            TextButton(
+              onPressed: () => _startTunnel(port),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('BIND', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFFF6821F),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: '✕',
+          textColor: Colors.white70,
+          onPressed: () => messenger.hideCurrentSnackBar(),
+        ),
+      ),
+    );
+  }
+
   void _showToast(String message, {bool isError = false, bool isInfo = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.redAccent : (isInfo ? Colors.blueGrey : Colors.green),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        action: SnackBarAction(
+          label: '✕',
+          textColor: Colors.white70,
+          onPressed: () => messenger.hideCurrentSnackBar(),
+        ),
       ),
     );
   }
