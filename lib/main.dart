@@ -11,6 +11,7 @@ import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
 import 'tunnel_watcher.dart';
 import 'http_inspector.dart';
+import 'har_exporter.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:brotli/brotli.dart';
@@ -480,6 +481,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _clearInspectorLogs() {
     _inspector?.clear();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _saveHar() async {
+    final inspector = _inspector;
+    if (inspector == null || inspector.requests.isEmpty) {
+      _showToast('No requests to export', isInfo: true);
+      return;
+    }
+    try {
+      final har = HarExporter.build(
+        inspector.requests,
+        inspectorUrl: 'http://localhost:${inspector.listenPort}',
+      );
+      final encoder = const JsonEncoder.withIndent('  ');
+      final json = encoder.convert(har);
+
+      final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+      final dir = home != null ? Directory('$home/Downloads') : Directory.systemTemp;
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+      final file = File('${dir.path}/cloudflare-inspector-$stamp.har');
+      await file.writeAsString(json);
+
+      if (mounted) {
+        _showToast('Saved ${inspector.requests.length} requests to ${file.path}', isInfo: true);
+        Clipboard.setData(ClipboardData(text: file.path));
+        await Future.delayed(const Duration(milliseconds: 200));
+        _showToast('Path copied to clipboard', isInfo: true);
+      }
+    } catch (e) {
+      _showToast('Failed to save HAR: $e', isError: true);
+    }
   }
 
   Future<void> _bindExistingTunnel(String tunnelId) async {
@@ -1043,6 +1078,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onPressed: requests.isEmpty ? null : _clearInspectorLogs,
                   icon: const Icon(Icons.cleaning_services, size: 16, color: Colors.grey),
                   label: const Text('Clear', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                ),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: requests.isEmpty ? null : _saveHar,
+                  icon: const Icon(Icons.download, size: 16, color: Color(0xFFF6821F)),
+                  label: const Text('Save as HAR', style: TextStyle(color: Color(0xFFF6821F), fontSize: 12)),
                 ),
                 const SizedBox(width: 4),
                 TextButton.icon(
