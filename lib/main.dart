@@ -7,6 +7,7 @@ import 'port_scanner.dart';
 import 'settings_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
+import 'tunnel_health.dart';
 
 void main() {
   runApp(const CloudflareManagerApp());
@@ -56,11 +57,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<int, int> _pidToTunnelPort = {};
   Map<int, String> _pidToTunnelLabel = {};
   List<TunnelInfo> _runningTunnels = [];
+  Map<String, TunnelHealth> _tunnelHealth = {};
+  bool _isCheckingHealth = false;
   bool _isLoadingPorts = true;
   bool _isLoadingRemoteTunnels = false;
   bool _isCloudflaredInstalled = false;
   Timer? _refreshTimer;
-  
+  Timer? _healthTimer;
+
   final _portsSearchController = TextEditingController();
   final _tunnelsSearchController = TextEditingController();
   String _portsSearchQuery = '';
@@ -75,6 +79,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchPorts();
       _fetchRemoteTunnels();
+    });
+    _healthTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _checkTunnelHealth();
     });
 
     _portsSearchController.addListener(() {
@@ -93,6 +100,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _healthTimer?.cancel();
     _portsSearchController.dispose();
     _tunnelsSearchController.dispose();
     super.dispose();
@@ -181,6 +189,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _isLoadingRemoteTunnels = false;
       });
     }
+    _checkTunnelHealth();
+  }
+
+  List<String> _collectHealthCheckUrls() {
+    final urls = <String>{};
+    for (final a in _activeTunnels) {
+      if (a.url.isNotEmpty) urls.add(a.url);
+    }
+    for (var t in _remoteTunnels) {
+      final id = t['id'] as String?;
+      if (id == null) continue;
+      final cfg = _tunnelConfigs[id];
+      final host = cfg?['hostname'];
+      if (host != null && host.isNotEmpty) urls.add('https://$host');
+    }
+    return urls.toList();
+  }
+
+  Future<void> _checkTunnelHealth() async {
+    if (_isCheckingHealth) return;
+    final urls = _collectHealthCheckUrls();
+    if (urls.isEmpty) return;
+    setState(() => _isCheckingHealth = true);
+    final results = await TunnelHealthChecker.checkAll(urls);
+    if (mounted) {
+      setState(() {
+        _tunnelHealth = results;
+        _isCheckingHealth = false;
+      });
+    }
   }
 
   Future<void> _startTunnel(int port) async {
@@ -244,6 +282,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       
       _showToast('Tunnel $fullDomain is active!');
       _fetchRemoteTunnels();
+      _checkTunnelHealth();
     } catch (e) {
       _showToast('Error: $e', isError: true);
     }
@@ -827,6 +866,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return items;
   }
 
+  Widget _buildHealthDot(TunnelHealth health) {
+    final Color color;
+    final String label;
+    if (!health.isReachable) {
+      color = Colors.redAccent;
+      label = health.error != null
+          ? 'Down · ${health.error}'
+          : 'Down${health.statusCode != null ? ' (${health.statusCode})' : ''}';
+    } else if (health.isSlow) {
+      color = Colors.orangeAccent;
+      label = 'Slow · ${health.latencyMs} ms${health.statusCode != null ? ' · ${health.statusCode}' : ''}';
+    } else {
+      color = Colors.greenAccent;
+      label = 'Up · ${health.latencyMs} ms${health.statusCode != null ? ' · ${health.statusCode}' : ''}';
+    }
+    return Tooltip(
+      message: label,
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(color: color.withOpacity(0.5), blurRadius: 4, spreadRadius: 1),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _composeSubtitle({
     required String service,
     required String status,
@@ -875,6 +945,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ? Colors.lightBlueAccent
             : Colors.grey;
     final copyUrl = tunnel?.url ?? url ?? title;
+    final health = _tunnelHealth[copyUrl];
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -892,7 +963,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (health != null) ...[
+                      const SizedBox(width: 8),
+                      _buildHealthDot(health),
+                    ] else if (_isCheckingHealth) ...[
+                      const SizedBox(width: 8),
+                      const SizedBox(
+                        width: 10,
+                        height: 10,
+                        child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.grey),
+                      ),
+                    ],
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
               ],
