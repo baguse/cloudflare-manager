@@ -91,6 +91,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _portsSearchQuery = '';
   String _tunnelsSearchQuery = '';
   String _inspectorSearchQuery = '';
+  String? _selectedTunnelTag;
 
   @override
   void initState() {
@@ -1067,6 +1068,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               backgroundColor: Color(0xFF0F172A),
               color: Color(0xFFF6821F),
             ),
+          _buildTunnelTagFilter(),
           Expanded(
             child: tunnelWidgets.isEmpty
                 ? Center(
@@ -1985,6 +1987,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
 
+      if (_selectedTunnelTag != null && _selectedTunnelTag!.isNotEmpty) {
+        final tags = config?['tags'] ?? '';
+        if (!tags.split(',').map((t) => t.trim()).contains(_selectedTunnelTag)) {
+          continue;
+        }
+      }
+
       if (local != null) {
         renderedTunnelIds.add(tunnelId);
         items.add(_buildTunnelRow(
@@ -2048,6 +2057,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           continue;
         }
       }
+      if (_selectedTunnelTag != null && _selectedTunnelTag!.isNotEmpty) continue;
 
       renderedPids.add(a.process.pid);
       items.add(_buildTunnelRow(
@@ -2077,6 +2087,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           continue;
         }
       }
+      if (_selectedTunnelTag != null && _selectedTunnelTag!.isNotEmpty) {
+        final tid = t.tunnelId;
+        if (tid == null) continue;
+        final ttags = _tunnelConfigs[tid]?['tags'] ?? '';
+        if (!ttags.split(',').map((t) => t.trim()).contains(_selectedTunnelTag)) {
+          continue;
+        }
+      }
 
       renderedPids.add(t.pid);
       if (t.tunnelId != null) renderedTunnelIds.add(t.tunnelId!);
@@ -2103,6 +2121,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     return items;
+  }
+
+  Widget _buildTunnelTagFilter() {
+    final allTags = <String>{};
+    for (final id in _tunnelConfigs.keys) {
+      final tags = _tunnelConfigs[id]?['tags'] ?? '';
+      for (final t in tags.split(',').map((t) => t.trim())) {
+        if (t.isNotEmpty) allTags.add(t);
+      }
+    }
+    if (allTags.isEmpty) return const SizedBox.shrink();
+
+    final sorted = allTags.toList()..sort();
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: FilterChip(
+              label: const Text('All', style: TextStyle(fontSize: 12)),
+              selected: _selectedTunnelTag == null || _selectedTunnelTag!.isEmpty,
+              onSelected: (_) => setState(() => _selectedTunnelTag = null),
+              selectedColor: const Color(0xFFF6821F),
+              checkmarkColor: Colors.white,
+              labelStyle: TextStyle(
+                fontSize: 12,
+                color: _selectedTunnelTag == null || _selectedTunnelTag!.isEmpty ? Colors.white : Colors.grey,
+              ),
+              backgroundColor: const Color(0xFF1E293B),
+              side: BorderSide.none,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+          ...sorted.map((tag) {
+            final color = _tagColors[tag] ?? const Color(0xFF6366F1);
+            final isSelected = _selectedTunnelTag == tag;
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                label: Text(tag, style: TextStyle(fontSize: 12, color: isSelected ? Colors.white : Colors.grey[300])),
+                selected: isSelected,
+                onSelected: (_) => setState(() => _selectedTunnelTag = isSelected ? null : tag),
+                selectedColor: color,
+                checkmarkColor: Colors.white,
+                backgroundColor: const Color(0xFF1E293B),
+                side: BorderSide.none,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                visualDensity: VisualDensity.compact,
+              ),
+            );
+          }),
+        ],
+      ),
+    );
   }
 
   Widget _buildHealthDot(TunnelHealth health) {
