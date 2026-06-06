@@ -227,7 +227,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final allNotes = await CloudflaredService.readAllTunnelNotes();
     for (final entry in allNotes.entries) {
       final id = entry.key;
-      configs.putIfAbsent(id, () => <String, String>{});
+      configs[id] ??= <String, String>{};
       if (entry.value.notes != null) configs[id]!['notes'] = entry.value.notes!;
       if (entry.value.tags != null) configs[id]!['tags'] = entry.value.tags!;
     }
@@ -2338,19 +2338,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
-                    if (tags != null && tags.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      _buildTagChips(tags),
-                    ],
-                    if (notes != null && notes.isNotEmpty) ...[
-                      const SizedBox(width: 8),
+                Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
+                if (tags != null && tags.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  _buildTagChips(tags),
+                ],
+                if (notes != null && notes.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
                       const Icon(Icons.notes, size: 12, color: Colors.orangeAccent),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          notes,
+                          style: const TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
                     ],
-                  ],
-                ),
+                  ),
+                ],
               ],
             ),
           ),
