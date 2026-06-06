@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'cloudflare_service.dart';
+import 'tray_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,6 +19,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = false;
   int? _autoBindMinPort;
   int? _autoBindMaxPort;
+  bool _closeToTray = false;
+  bool _autoStart = false;
 
   @override
   void initState() {
@@ -31,6 +34,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final accountId = await _storage.read(key: CloudflareService.accountIdKey);
     final min = await _storage.read(key: 'auto_bind_min_port');
     final max = await _storage.read(key: 'auto_bind_max_port');
+    final closeToTray = await _storage.read(key: 'close_to_tray');
+    final autoStart = await _storage.read(key: 'auto_start');
 
     if (token != null) _tokenController.text = token;
     if (accountId != null) _accountIdController.text = accountId;
@@ -42,6 +47,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _autoBindMaxPort = int.tryParse(max);
       _maxPortController.text = max;
     }
+    _closeToTray = closeToTray == 'true';
+    _autoStart = autoStart == 'true';
 
     setState(() => _isLoading = false);
   }
@@ -181,6 +188,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 32),
+                  const Text('App Behavior',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    title: const Text('Minimize to tray on close'),
+                    subtitle: const Text('App stays running in the system tray when you close the window'),
+                    value: _closeToTray,
+                    activeThumbColor: const Color(0xFFF6821F),
+                    onChanged: (v) async {
+                      setState(() => _closeToTray = v);
+                      await TrayService.instance.setCloseToTray(v);
+                    },
+                  ),
+                  SwitchListTile(
+                    title: const Text('Launch on system startup'),
+                    subtitle: const Text('Start automatically when you log in, minimized to tray'),
+                    value: _autoStart,
+                    activeThumbColor: const Color(0xFFF6821F),
+                    onChanged: (v) async {
+                      setState(() => _autoStart = v);
+                      await TrayService.instance.setAutoStart(v);
+                      if (v && !_closeToTray) {
+                        setState(() => _closeToTray = true);
+                        await TrayService.instance.setCloseToTray(true);
+                      }
+                    },
                   ),
                   const SizedBox(height: 32),
                   SizedBox(

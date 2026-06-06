@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+// ignore: duplicate_import
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:window_manager/window_manager.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -15,11 +18,26 @@ import 'tunnel_heatmap.dart';
 import 'tunnel_watcher.dart';
 import 'http_inspector.dart';
 import 'har_exporter.dart';
+import 'tray_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:brotli/brotli.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+
+  const windowOptions = WindowOptions(
+    size: Size(1280, 720),
+    minimumSize: Size(900, 600),
+    center: true,
+    title: 'Cloudflare Manager',
+  );
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+
   runApp(const CloudflareManagerApp());
 }
 
@@ -57,7 +75,7 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   List<OpenPort> _openPorts = [];
   List<ActiveTunnel> _activeTunnels = [];
   List<Map<String, dynamic>> _remoteTunnels = [];
@@ -97,6 +115,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
+    TrayService.instance.init();
     _checkCloudflared();
     _fetchPorts();
     _restoreInspector();
@@ -144,7 +164,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _portsSearchController.dispose();
     _tunnelsSearchController.dispose();
     _inspectorSearchController.dispose();
+    windowManager.removeListener(this);
     super.dispose();
+  }
+
+  @override
+  void onWindowClose() {
+    TrayService.instance.handleWindowClose();
   }
 
   Future<void> _fetchPorts() async {
