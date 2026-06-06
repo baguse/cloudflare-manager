@@ -222,6 +222,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
+    final allNotes = await CloudflaredService.readAllTunnelNotes();
+    for (final entry in allNotes.entries) {
+      final id = entry.key;
+      configs.putIfAbsent(id, () => <String, String>{});
+      if (entry.value.notes != null) configs[id]!['notes'] = entry.value.notes!;
+      if (entry.value.tags != null) configs[id]!['tags'] = entry.value.tags!;
+    }
+
     if (mounted) {
       setState(() {
         _openPorts = ports;
@@ -2266,6 +2274,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             : Colors.grey;
     final copyUrl = tunnel?.url ?? url ?? title;
     final health = _tunnelHealth[copyUrl];
+    final noteData = tunnelId != null ? _tunnelConfigs[tunnelId] : null;
+    final notes = noteData?['notes'];
+    final tags = noteData?['tags'];
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2314,10 +2325,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
+                Row(
+                  children: [
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
+                    if (tags != null && tags.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      _buildTagChips(tags),
+                    ],
+                    if (notes != null && notes.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      const Icon(Icons.notes, size: 12, color: Colors.orangeAccent),
+                    ],
+                  ],
+                ),
               ],
             ),
           ),
+          if (tunnelId != null)
+            IconButton(
+              icon: Icon(Icons.edit_note, size: 20, color: (notes != null && notes.isNotEmpty) ? const Color(0xFFF6821F) : Colors.grey),
+              tooltip: 'Edit notes & tags',
+              onPressed: () => _showNotesDialog(tunnelId),
+            ),
           if (isLocal && tunnel != null) ...[
             IconButton(
               icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
@@ -2405,6 +2434,286 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ]
         ],
+      ),
+    );
+  }
+
+  static const Map<String, Color> _tagColors = {
+    'prod': Color(0xFFE53935),
+    'production': Color(0xFFE53935),
+    'staging': Color(0xFFFF8F00),
+    'dev': Color(0xFF42A5F5),
+    'development': Color(0xFF42A5F5),
+    'api': Color(0xFF7C4DFF),
+    'internal': Color(0xFF00ACC1),
+    'testing': Color(0xFF43A047),
+    'monitoring': Color(0xFFFDD835),
+    'backend': Color(0xFF1E88E5),
+    'frontend': Color(0xFF43A047),
+    'database': Color(0xFF8E24AA),
+    'auth': Color(0xFFE53935),
+    'webhook': Color(0xFFFF8F00),
+  };
+
+  Color _tagColor(String tag) {
+    return _tagColors[tag.toLowerCase()] ?? const Color(0xFF546E7A);
+  }
+
+  Widget _buildTagChips(String tags) {
+    final parts = tags.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    return Wrap(
+      spacing: 4,
+      children: parts.map((tag) {
+        final display = tag.length > 12 ? '${tag.substring(0, 12)}…' : tag;
+        return Tooltip(
+          message: tag,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: _tagColor(tag).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: _tagColor(tag).withOpacity(0.4)),
+            ),
+            child: Text(display, style: TextStyle(fontSize: 9, color: _tagColor(tag), fontWeight: FontWeight.bold)),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  static const List<String> _presetTags = [
+    'prod', 'staging', 'dev', 'api', 'internal', 'testing', 'monitoring',
+    'backend', 'frontend', 'database', 'auth', 'webhook',
+  ];
+
+  void _showNotesDialog(String tunnelId) {
+    final cfg = _tunnelConfigs[tunnelId] ?? {};
+    final notesController = TextEditingController(text: cfg['notes'] ?? '');
+    final initialTags = (cfg['tags'] ?? '').split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    final selectedTags = ValueNotifier<List<String>>(List.from(initialTags));
+    final tagInputController = TextEditingController();
+
+    void _toggleTag(String tag) {
+      final current = List<String>.from(selectedTags.value);
+      if (current.contains(tag)) {
+        current.remove(tag);
+      } else {
+        if (current.length >= 5) {
+          _showToast('Max 5 tags allowed', isInfo: true);
+          return;
+        }
+        current.add(tag);
+      }
+      selectedTags.value = current;
+    }
+
+    void _addCustomTag(String tag) {
+      final trimmed = tag.trim();
+      if (trimmed.isEmpty) return;
+      final current = List<String>.from(selectedTags.value);
+      if (!current.contains(trimmed)) {
+        if (current.length >= 5) {
+          _showToast('Max 5 tags allowed', isInfo: true);
+          return;
+        }
+        current.add(trimmed);
+        selectedTags.value = current;
+      }
+      tagInputController.clear();
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 450,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.edit_note, color: Color(0xFFF6821F), size: 20),
+                  const SizedBox(width: 10),
+                  const Text('Tunnel Notes & Tags', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => Navigator.pop(dialogCtx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Notes', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: notesController,
+                maxLines: 4,
+                style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                decoration: InputDecoration(
+                  hintText: 'e.g. staging env, behind SSO, owned by @alice',
+                  hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+                  filled: true,
+                  fillColor: const Color(0xFF1E293B),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Tags', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 2),
+              const Text('Max 5 tags', style: TextStyle(fontSize: 10, color: Colors.grey)),
+              const SizedBox(height: 6),
+              ValueListenableBuilder<List<String>>(
+                valueListenable: selectedTags,
+                builder: (context, tags, _) {
+                  return Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: tags.map((tag) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _tagColor(tag).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: _tagColor(tag).withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(tag, style: TextStyle(fontSize: 10, color: _tagColor(tag), fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () => _toggleTag(tag),
+                            child: Icon(Icons.close, size: 12, color: _tagColor(tag)),
+                          ),
+                        ],
+                      ),
+                    )).toList(),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+              const Text('Preset tags:', style: TextStyle(fontSize: 10, color: Colors.grey)),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: _presetTags.map((tag) {
+                  return ValueListenableBuilder<List<String>>(
+                    valueListenable: selectedTags,
+                    builder: (context, tags, _) {
+                      final isSelected = tags.contains(tag);
+                      final disabled = !isSelected && tags.length >= 5;
+                      return GestureDetector(
+                        onTap: disabled ? null : () => _toggleTag(tag),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isSelected ? _tagColor(tag).withOpacity(0.2) : const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isSelected ? _tagColor(tag).withOpacity(0.5) : const Color(0xFF334155),
+                            ),
+                          ),
+                          child: Text(
+                            tag,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: disabled ? Colors.grey : (isSelected ? _tagColor(tag) : Colors.grey),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.add, size: 14, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: ValueListenableBuilder<List<String>>(
+                      valueListenable: selectedTags,
+                      builder: (context, tags, _) {
+                        final atMax = tags.length >= 5;
+                        return Autocomplete<String>(
+                          optionsBuilder: atMax
+                              ? (_) => const []
+                              : (textEditingValue) {
+                                  final query = textEditingValue.text.trim();
+                                  if (query.isEmpty) return _presetTags;
+                                  return _presetTags.where((t) => t.toLowerCase().contains(query.toLowerCase()));
+                                },
+                          fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
+                            tagInputController.text = controller.text;
+                            return TextField(
+                              controller: controller,
+                              focusNode: focusNode,
+                              enabled: !atMax,
+                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                              decoration: InputDecoration(
+                                hintText: atMax ? 'Max 5 tags reached' : 'Select or type custom…',
+                                hintStyle: TextStyle(fontSize: 11, color: atMax ? Colors.redAccent.withOpacity(0.6) : Colors.grey),
+                                filled: true,
+                                fillColor: const Color(0xFF1E293B),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                isDense: true,
+                              ),
+                              onSubmitted: atMax ? null : (v) {
+                                _addCustomTag(v);
+                                controller.clear();
+                              },
+                            );
+                          },
+                          onSelected: atMax ? null : (option) {
+                            _toggleTag(option);
+                            tagInputController.clear();
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFF6821F),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () async {
+                    final notes = notesController.text.trim();
+                    final tags = selectedTags.value.join(',');
+                    await CloudflaredService.saveTunnelNotes(
+                      tunnelId,
+                      notes: notes.isEmpty ? null : notes,
+                      tags: tags.isEmpty ? null : tags,
+                    );
+                    if (mounted) {
+                      setState(() {
+                        _tunnelConfigs[tunnelId] ??= {};
+                        _tunnelConfigs[tunnelId]!['notes'] = notes.isEmpty ? '' : notes;
+                        _tunnelConfigs[tunnelId]!['tags'] = tags.isEmpty ? '' : tags;
+                      });
+                    }
+                    Navigator.pop(dialogCtx);
+                  },
+                  child: const Text('Save', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -241,6 +241,70 @@ class CloudflaredService {
     }
   }
 
+  static Future<void> saveTunnelNotes(String tunnelId, {String? notes, String? tags}) async {
+    final file = _appTunnelMapFile();
+    if (file == null) return;
+    try {
+      final content = await file.exists() ? await file.readAsString() : '{}';
+      final data = json.decode(content);
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final existing = map[tunnelId];
+      map[tunnelId] = {
+        if (existing is Map) ...existing,
+        'port': existing is Map && existing['port'] is num ? existing['port'] : (existing is num ? existing : 0),
+        if (notes != null) 'notes': notes,
+        if (tags != null) 'tags': tags,
+      };
+      await file.parent.create(recursive: true);
+      await file.writeAsString(json.encode(map));
+    } catch (e) {
+      print('Error saving tunnel notes: $e');
+    }
+  }
+
+  static Future<({String? notes, String? tags})> readTunnelNotes(String tunnelId) async {
+    final file = _appTunnelMapFile();
+    if (file == null) return (notes: null, tags: null);
+    try {
+      if (!await file.exists()) return (notes: null, tags: null);
+      final data = json.decode(await file.readAsString());
+      if (data is Map) {
+        final entry = data[tunnelId];
+        if (entry is Map) {
+          return (
+            notes: entry['notes'] as String?,
+            tags: entry['tags'] as String?,
+          );
+        }
+      }
+    } catch (e) {
+    }
+    return (notes: null, tags: null);
+  }
+
+  static Future<Map<String, ({String? notes, String? tags})>> readAllTunnelNotes() async {
+    final file = _appTunnelMapFile();
+    if (file == null) return {};
+    try {
+      if (!await file.exists()) return {};
+      final data = json.decode(await file.readAsString());
+      if (data is Map) {
+        final out = <String, ({String? notes, String? tags})>{};
+        data.forEach((k, v) {
+          if (v is Map) {
+            out[k.toString()] = (
+              notes: v['notes'] as String?,
+              tags: v['tags'] as String?,
+            );
+          }
+        });
+        return out;
+      }
+    } catch (e) {
+    }
+    return {};
+  }
+
   static Future<void> unregisterAppTunnel(String tunnelId) async {
     final file = _appTunnelMapFile();
     if (file == null) return;
