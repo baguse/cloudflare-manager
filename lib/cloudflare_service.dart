@@ -376,4 +376,54 @@ class CloudflareService {
     }
     return false;
   }
+
+  static Future<Map<String, int>> fetchTunnelAnalytics(String zoneId, String hostname, {int daysBack = 30}) async {
+    try {
+      final headers = await _getHeaders();
+      final since = DateTime.now().subtract(Duration(days: daysBack)).toIso8601String();
+      final query = '''
+query {
+  viewer {
+    zones(filter: { zoneTag: "$zoneId" }) {
+      httpRequests1hGroups(
+        filter: { host: "$hostname", datetime_gt: "$since" }
+        limit: 10000
+        order: [datetime_ASC]
+      ) {
+        dimensions { datetime }
+        sum { requests }
+      }
+    }
+  }
+}''';
+
+      final resp = await http.post(
+        Uri.parse('$baseUrl/graphql'),
+        headers: {...headers, 'Content-Type': 'application/json'},
+        body: json.encode({'query': query}),
+      );
+
+      if (resp.statusCode != 200) return {};
+
+      final body = json.decode(resp.body);
+      final zones = body?['data']?['viewer']?['zones'] as List?;
+      if (zones == null || zones.isEmpty) return {};
+
+      final groups = zones[0]['httpRequests1hGroups'] as List?;
+      if (groups == null) return {};
+
+      final out = <String, int>{};
+      for (final g in groups) {
+        final datetime = g['dimensions']?['datetime'] as String?;
+        final requests = g['sum']?['requests'] as int?;
+        if (datetime != null && requests != null) {
+          final date = datetime.substring(0, 10);
+          out[date] = (out[date] ?? 0) + requests;
+        }
+      }
+      return out;
+    } catch (_) {
+      return {};
+    }
+  }
 }

@@ -11,6 +11,7 @@ import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
 import 'latency_sparkline.dart';
+import 'tunnel_heatmap.dart';
 import 'tunnel_watcher.dart';
 import 'http_inspector.dart';
 import 'har_exporter.dart';
@@ -68,6 +69,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<TunnelInfo> _runningTunnels = [];
   Map<String, TunnelHealth> _tunnelHealth = {};
   final Map<String, List<int>> _tunnelHealthHistory = {};
+  final Map<String, Map<String, int>> _tunnelActivity = {};
   bool _isCheckingHealth = false;
   HttpInspector? _inspector;
   StreamSubscription<CapturedRequest>? _inspectorSub;
@@ -278,6 +280,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (history.length > 30) {
             history.removeRange(0, history.length - 30);
           }
+          if (entry.value.isReachable) {
+            final today = DateTime.now().toIso8601String().substring(0, 10);
+            final dayMap = _tunnelActivity.putIfAbsent(entry.key, () => <String, int>{});
+            dayMap[today] = (dayMap[today] ?? 0) + 1;
+            _pruneOldActivity(dayMap);
+          }
         }
         _isCheckingHealth = false;
       });
@@ -293,6 +301,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return <int>[sample];
     }
     return <int>[];
+  }
+
+  void _pruneOldActivity(Map<String, int> dayMap) {
+    final cutoff = DateTime.now().subtract(const Duration(days: 30)).toIso8601String().substring(0, 10);
+    dayMap.removeWhere((date, _) => date.compareTo(cutoff) < 0);
   }
 
   void _toggleWatcher() {
@@ -2362,6 +2375,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onPressed: () => _showQrDialog(copyUrl),
             ),
             IconButton(
+              icon: const Icon(Icons.calendar_month, size: 18, color: Colors.grey),
+              tooltip: 'Activity heatmap',
+              onPressed: () => _showHeatmapDialog(copyUrl),
+            ),
+            IconButton(
               icon: const Icon(Icons.terminal, size: 20, color: Colors.grey),
               tooltip: 'View Logs',
               onPressed: () => _showLogsDialog(tunnel),
@@ -2389,6 +2407,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               icon: const Icon(Icons.qr_code, size: 20, color: Colors.grey),
               tooltip: 'Show QR Code',
               onPressed: () => _showQrDialog(copyUrl),
+            ),
+            IconButton(
+              icon: const Icon(Icons.calendar_month, size: 18, color: Colors.grey),
+              tooltip: 'Activity heatmap',
+              onPressed: () => _showHeatmapDialog(copyUrl),
             ),
             IconButton(
               icon: const Icon(Icons.terminal, size: 20, color: Colors.grey,
@@ -2420,6 +2443,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               icon: const Icon(Icons.qr_code, size: 20, color: Colors.grey),
               tooltip: 'Show QR Code',
               onPressed: () => _showQrDialog(copyUrl),
+            ),
+            IconButton(
+              icon: const Icon(Icons.calendar_month, size: 18, color: Colors.grey),
+              tooltip: 'Activity heatmap',
+              onPressed: () => _showHeatmapDialog(copyUrl),
             ),
             if (onBind != null)
               TextButton.icon(
@@ -2825,6 +2853,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _showHeatmapDialog(String url) {
+    final counts = _tunnelActivity[url] ?? const {};
+    final max = counts.isEmpty ? 0 : counts.values.reduce((a, b) => a > b ? a : b);
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 360,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.calendar_month, color: Color(0xFFF6821F), size: 20),
+                  const SizedBox(width: 10),
+                  const Text('Activity Heatmap', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: TunnelHeatmap(dayCounts: counts, maxCount: max),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
