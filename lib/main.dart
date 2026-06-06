@@ -769,6 +769,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: isError ? Colors.redAccent : (isInfo ? Colors.blueGrey : Colors.green),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 3),
         action: SnackBarAction(
           label: '✕',
           textColor: Colors.white70,
