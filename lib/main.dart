@@ -81,6 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _refreshTimer;
   Timer? _healthTimer;
   Set<int> _previousPorts = {};
+  Set<int> _offeredPorts = {};
   int? _autoBindMinPort;
   int? _autoBindMaxPort;
   final _secureStorage = const FlutterSecureStorage();
@@ -159,6 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
     _previousPorts = currentPorts;
+    _offeredPorts.removeWhere((p) => !currentPorts.contains(p));
 
     setState(() {
       _openPorts = ports;
@@ -745,6 +747,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _offerBind(int port, OpenPort? openPort) {
     if (_tunnelLabelForPort(port) != null) return;
     if (!_isPortAllowed(port)) return;
+    if (_offeredPorts.contains(port)) return;
+    _offeredPorts.add(port);
     final label = openPort?.processName ?? 'port $port';
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
