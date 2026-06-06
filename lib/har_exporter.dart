@@ -6,6 +6,7 @@ class HarExporter {
     final entries = <Map<String, dynamic>>[];
     for (final r in requests) {
       if (r.method.isEmpty) continue;
+      if (r.wsFrames != null) continue;
       entries.add(_entryToHar(r, inspectorUrl: inspectorUrl));
     }
     return {

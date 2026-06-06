@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 
 class CapturedBody {
   final List<int> bytes;
@@ -21,9 +22,28 @@ class CapturedBody {
   }
 }
 
+class CapturedWsFrame {
+  final DateTime timestamp;
+  final String direction;
+  final int opcode;
+  final String? text;
+  final int size;
+
+  CapturedWsFrame({
+    required this.timestamp,
+    required this.direction,
+    required this.opcode,
+    this.text,
+    required this.size,
+  });
+
+  bool get isText => opcode == 0x1;
+  bool get isBinary => opcode == 0x2;
+}
+
 class CapturedRequest {
   final DateTime timestamp;
-  final String method;
+  String method;
   final String path;
   final Map<String, List<String>> requestHeaders;
   int? requestBodySize;
@@ -35,6 +55,9 @@ class CapturedRequest {
   int? latencyMs;
   String? error;
   bool completed = false;
+  List<CapturedWsFrame>? wsFrames;
+  int? wsCloseCode;
+  String? wsCloseReason;
 
   CapturedRequest({
     required this.timestamp,
@@ -94,15 +117,23 @@ class HttpInspector {
 
   Future<void> _handle(HttpRequest req) async {
     final start = DateTime.now();
+    final isWs = req.headers.value('upgrade')?.toLowerCase() == 'websocket' &&
+        req.headers.value('sec-websocket-key') != null;
+
     final captured = CapturedRequest(
       timestamp: start,
-      method: req.method,
+      method: isWs ? 'WS' : req.method,
       path: req.uri.path + (req.uri.query.isEmpty ? '' : '?${req.uri.query}'),
       requestHeaders: _copyHeaders(req.headers),
       requestBodySize: req.contentLength,
     );
     _requests.add(captured);
     _requestsController.add(captured);
+
+    if (isWs) {
+      await _handleWebSocket(req, captured, start);
+      return;
+    }
 
     final client = HttpClient();
     client.autoUncompress = false;
@@ -114,7 +145,7 @@ class HttpInspector {
         path: req.uri.path,
         query: req.uri.query.isEmpty ? null : req.uri.query,
       );
-      final forward = await client.openUrl(req.method, targetUri).timeout(const Duration(seconds: 4));
+      final forward = await client.openUrl(req.method, targetUri).timeout(const Duration(seconds: 10));
       req.headers.forEach((name, values) {
         if (_hopByHopHeaders.contains(name.toLowerCase())) return;
         for (final v in values) {
@@ -126,7 +157,7 @@ class HttpInspector {
       captured.requestBody = reqTee.body;
       captured.requestBodySize = reqTee.totalBytes > 0 ? reqTee.totalBytes : null;
 
-      final response = await forward.close().timeout(const Duration(seconds: 4));
+      final response = await forward.close().timeout(const Duration(seconds: 15));
       captured.statusCode = response.statusCode;
       captured.responseHeaders = _copyHeaders(response.headers);
 
@@ -146,7 +177,7 @@ class HttpInspector {
       _requestsController.add(captured);
       await req.response.close();
     } on TimeoutException {
-      captured.error = 'Upstream timeout (>4s)';
+      captured.error = 'Upstream timeout (>15s)';
       captured.statusCode = HttpStatus.gatewayTimeout;
       captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
       captured.completed = true;
@@ -169,6 +200,114 @@ class HttpInspector {
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<void> _handleWebSocket(HttpRequest req, CapturedRequest captured, DateTime start) async {
+    final query = req.uri.query.isEmpty ? '' : '?${req.uri.query}';
+    final uri = 'ws://localhost:$targetPort${req.uri.path}$query';
+
+    WebSocket targetWs;
+    try {
+      targetWs = await WebSocket.connect(uri).timeout(const Duration(seconds: 15));
+    } catch (e) {
+      captured.error = 'WS target connect failed: $uri — $e';
+      _failWs(captured, start, req);
+      return;
+    }
+
+    WebSocket clientWs;
+    try {
+      final key = req.headers.value('sec-websocket-key')!;
+      final accept = base64Encode(
+        sha1.convert(utf8.encode('$key$_wsMagicGuid')).bytes,
+      );
+
+      req.response.statusCode = HttpStatus.switchingProtocols;
+      req.response.headers.set('upgrade', 'websocket');
+      req.response.headers.set('connection', 'Upgrade');
+      req.response.headers.set('sec-websocket-accept', accept);
+
+      final clientSocket = await req.response.detachSocket();
+      clientWs = WebSocket.fromUpgradedSocket(clientSocket, serverSide: true);
+    } catch (e) {
+      captured.error = 'WS client upgrade failed: $e';
+      try { await targetWs.close(); } catch (_) {}
+      _failWs(captured, start, req);
+      return;
+    }
+
+    captured.statusCode = 101;
+    captured.wsFrames = [];
+    captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
+    _requestsController.add(captured);
+
+    try {
+      await Future.wait([
+        _relayWs(clientWs, targetWs, '\u2191 client\u2192server', captured),
+        _relayWs(targetWs, clientWs, '\u2193 server\u2192client', captured),
+      ]);
+    } catch (e) {
+      captured.error = 'WS relay error: $e';
+    }
+
+    captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
+    captured.completed = true;
+    _requestsController.add(captured);
+  }
+
+  void _failWs(CapturedRequest captured, DateTime start, HttpRequest req) {
+    captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
+    captured.completed = true;
+    _requestsController.add(captured);
+    try {
+      req.response.statusCode = HttpStatus.badGateway;
+      req.response.write('Inspector: ${captured.error}');
+      req.response.close();
+    } catch (_) {}
+  }
+
+  Future<void> _relayWs(WebSocket source, WebSocket dest, String direction, CapturedRequest captured) async {
+    final sub = source.listen(
+      (data) {
+        final now = DateTime.now();
+        if (data is String) {
+          captured.wsFrames!.add(CapturedWsFrame(
+            timestamp: now,
+            direction: direction,
+            opcode: 0x1,
+            text: data,
+            size: utf8.encode(data).length,
+          ));
+        } else if (data is List<int>) {
+          captured.wsFrames!.add(CapturedWsFrame(
+            timestamp: now,
+            direction: direction,
+            opcode: 0x2,
+            size: data.length,
+          ));
+        }
+        dest.add(data);
+        _requestsController.add(captured);
+      },
+      onDone: () async {
+        final closeCode = source.closeCode ?? 1005;
+        final closeReason = source.closeReason;
+        captured.wsCloseCode ??= closeCode;
+        captured.wsCloseReason ??= closeReason;
+        try {
+          await dest.close(closeCode, closeReason);
+        } catch (_) {}
+      },
+      onError: (e) {
+        captured.error = 'WS relay error ($direction): $e';
+        try { dest.close(1011, e.toString()); } catch (_) {}
+        try { source.close(1011, e.toString()); } catch (_) {}
+      },
+    );
+
+    try {
+      await sub.asFuture();
+    } catch (_) {}
   }
 
   Future<_TeeResult> _teeStream(Stream<List<int>> source, IOSink destination) async {
@@ -217,4 +356,6 @@ class HttpInspector {
     'host',
     'content-length',
   };
+
+  static const String _wsMagicGuid = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 }

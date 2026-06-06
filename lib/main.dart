@@ -85,8 +85,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   final _portsSearchController = TextEditingController();
   final _tunnelsSearchController = TextEditingController();
+  final _inspectorSearchController = TextEditingController();
   String _portsSearchQuery = '';
   String _tunnelsSearchQuery = '';
+  String _inspectorSearchQuery = '';
 
   @override
   void initState() {
@@ -109,6 +111,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
     _tunnelsSearchController.addListener(() {
       setState(() => _tunnelsSearchQuery = _tunnelsSearchController.text.toLowerCase());
+    });
+    _inspectorSearchController.addListener(() {
+      setState(() => _inspectorSearchQuery = _inspectorSearchController.text.toLowerCase());
     });
   }
 
@@ -134,6 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _inspector?.stop();
     _portsSearchController.dispose();
     _tunnelsSearchController.dispose();
+    _inspectorSearchController.dispose();
     super.dispose();
   }
 
@@ -1121,6 +1127,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildInspectorPanel() {
     final inspector = _inspector!;
     final requests = inspector.requests;
+    final filtered = _inspectorSearchQuery.isEmpty
+        ? requests
+        : requests.where((r) {
+            final q = _inspectorSearchQuery;
+            if (r.path.toLowerCase().contains(q)) return true;
+            if (r.method.toLowerCase().contains(q)) return true;
+            if (r.statusCode != null && r.statusCode.toString().contains(q)) return true;
+            if (r.error != null && r.error!.toLowerCase().contains(q)) return true;
+            final ct = _contentType(r.responseHeaders);
+            if (ct != null && ct.toLowerCase().contains(q)) return true;
+            return false;
+          }).toList();
     return Card(
       color: const Color(0xFF1E293B),
       elevation: 8,
@@ -1149,6 +1167,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                SizedBox(
+                  width: 140,
+                  height: 28,
+                  child: TextField(
+                    controller: _inspectorSearchController,
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white70),
+                    decoration: InputDecoration(
+                      hintText: 'Filter...',
+                      hintStyle: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace'),
+                      prefixIcon: const Icon(Icons.search, size: 14, color: Colors.grey),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                      filled: true,
+                      fillColor: const Color(0xFF0F172A),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide.none),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
@@ -1157,7 +1194,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     border: Border.all(color: Colors.green.withOpacity(0.4)),
                   ),
                   child: Text(
-                    '${requests.length} REQ',
+                    _inspectorSearchQuery.isEmpty
+                        ? '${requests.length} REQ'
+                        : '${filtered.length}/${requests.length}',
                     style: const TextStyle(fontSize: 10, color: Colors.greenAccent, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -1200,10 +1239,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                   )
-                : ListView.separated(
-                    itemCount: requests.length,
-                    separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 1),
-                    itemBuilder: (context, i) => _buildCapturedRequestRow(requests[requests.length - 1 - i]),
+                : filtered.isEmpty
+                    ? const Center(
+                        child: Text('No matching entries.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      )
+                    : ListView.separated(
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 1),
+                        itemBuilder: (context, i) => _buildCapturedRequestRow(filtered[filtered.length - 1 - i]),
                   ),
           ),
         ],
@@ -1213,11 +1256,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildCapturedRequestRow(CapturedRequest r) {
     final time = '${r.timestamp.hour.toString().padLeft(2, '0')}:${r.timestamp.minute.toString().padLeft(2, '0')}:${r.timestamp.second.toString().padLeft(2, '0')}';
+    final isWs = r.wsFrames != null;
     final Color statusColor;
-    if (!r.completed) {
+    if (!r.completed && !isWs) {
       statusColor = Colors.grey;
     } else if (r.error != null) {
       statusColor = Colors.redAccent;
+    } else if (isWs && !r.completed) {
+      statusColor = Colors.greenAccent;
+    } else if (r.wsCloseCode != null && r.wsCloseCode! > 1001) {
+      statusColor = Colors.redAccent;
+    } else if (isWs) {
+      statusColor = Colors.greenAccent;
     } else if (r.statusCode != null && r.statusCode! >= 500) {
       statusColor = Colors.redAccent;
     } else if (r.statusCode != null && r.statusCode! >= 400) {
@@ -1227,7 +1277,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } else {
       statusColor = Colors.greenAccent;
     }
-    final contentType = _contentType(r.responseHeaders);
+    final contentType = isWs ? null : _contentType(r.responseHeaders);
+    final methodColor = isWs ? const Color(0xFF42A5F5) : const Color(0xFFF6821F);
     return InkWell(
       onTap: () => _showRequestDetailDialog(r),
       child: Padding(
@@ -1241,7 +1292,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SizedBox(
               width: 50,
               child: Text(
-                r.completed ? '${r.statusCode ?? (r.error != null ? 'ERR' : '…')}' : '…',
+                isWs
+                  ? (r.completed
+                      ? '${r.wsCloseCode ?? 101}'
+                      : '101')
+                  : (r.completed ? '${r.statusCode ?? (r.error != null ? 'ERR' : '…')}' : '…'),
                 style: TextStyle(fontSize: 12, color: statusColor, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
               ),
             ),
@@ -1250,7 +1305,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               width: 50,
               child: Text(
                 r.method,
-                style: const TextStyle(fontSize: 11, color: Color(0xFFF6821F), fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                style: TextStyle(fontSize: 11, color: methodColor, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
               ),
             ),
             Expanded(
@@ -1284,7 +1339,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SizedBox(
               width: 60,
               child: Text(
-                r.completed ? '${r.latencyMs ?? 0} ms' : '...',
+                isWs && !r.completed
+                    ? 'live'
+                    : (r.completed ? '${r.latencyMs ?? 0} ms' : '...'),
                 textAlign: TextAlign.right,
                 style: TextStyle(fontSize: 11, color: r.latencyMs != null && r.latencyMs! > 500 ? Colors.orangeAccent : Colors.grey, fontFamily: 'monospace'),
               ),
@@ -1333,6 +1390,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showRequestDetailDialog(CapturedRequest r) {
+    if (r.wsFrames != null) {
+      _showWsDetailDialog(r);
+      return;
+    }
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1407,6 +1468,158 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showWsDetailDialog(CapturedRequest r) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 700,
+          height: 500,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text('GET ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF42A5F5), fontFamily: 'monospace')),
+                  Expanded(
+                    child: Text(
+                      r.path,
+                      style: const TextStyle(fontSize: 14, color: Colors.white, fontFamily: 'monospace'),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: r.completed && r.wsCloseCode != null && r.wsCloseCode! > 1001
+                          ? Colors.redAccent.withOpacity(0.2)
+                          : Colors.greenAccent.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      r.completed ? '${r.wsCloseCode ?? 1005}' : '101',
+                      style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF42A5F5).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('WS', style: TextStyle(fontSize: 10, color: Color(0xFF42A5F5), fontWeight: FontWeight.bold)),
+                  ),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                ],
+              ),
+              const Divider(color: Color(0xFF334155)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildDetailSection('Request headers', r.requestHeaders),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.swap_horiz, size: 14, color: Color(0xFF42A5F5)),
+                          const SizedBox(width: 8),
+                          const Text('WebSocket Frames', style: TextStyle(fontSize: 12, color: Color(0xFFF6821F), fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          Text('${r.wsFrames!.length} frames', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: r.wsFrames!.isEmpty
+                          ? const Center(child: Text('No frames captured yet', style: TextStyle(color: Colors.grey, fontSize: 12)))
+                          : ListView.separated(
+                              itemCount: r.wsFrames!.length,
+                              separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 1),
+                              itemBuilder: (context, i) => _buildWsFrameRow(r.wsFrames![i]),
+                            ),
+                    ),
+                    if (r.error != null) ...[
+                      const SizedBox(height: 8),
+                      _buildSimpleDetail('Error', r.error!),
+                    ],
+                    if (r.completed) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Connection closed  ·  ${r.wsCloseReason ?? 'no reason'}  ·  ${r.latencyMs ?? 0} ms  ·  ${r.timestamp.toIso8601String()}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 11, fontFamily: 'monospace'),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      const Row(
+                        children: [
+                          Icon(Icons.circle, size: 6, color: Colors.greenAccent),
+                          SizedBox(width: 6),
+                          Text('Connected', style: TextStyle(color: Colors.greenAccent, fontSize: 11)),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWsFrameRow(CapturedWsFrame f) {
+    final ts = '${f.timestamp.hour.toString().padLeft(2, '0')}:${f.timestamp.minute.toString().padLeft(2, '0')}:${f.timestamp.second.toString().padLeft(2, '0')}';
+    final isUp = f.direction.contains('\u2191');
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(ts, style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: 'monospace')),
+          const SizedBox(width: 8),
+          Text(isUp ? '\u2191' : '\u2193', style: TextStyle(fontSize: 12, color: isUp ? Colors.orangeAccent : Colors.cyanAccent, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: f.isText ? Colors.green.withOpacity(0.15) : Colors.grey.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: Text(
+              f.isText ? 'TEXT' : 'BIN',
+              style: TextStyle(fontSize: 9, color: f.isText ? Colors.greenAccent : Colors.grey, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: f.isText && f.text != null
+                ? Text(
+                    f.text!.length > 200 ? '${f.text!.substring(0, 200)}…' : f.text!,
+                    style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace'),
+                  )
+                : Text(
+                    '[binary ${f.size} bytes]',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace', fontStyle: FontStyle.italic),
+                  ),
+          ),
+        ],
       ),
     );
   }
