@@ -782,194 +782,281 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
-        children: [
-          // Sidebar
-          Material(
-            color: const Color(0xFF1E293B),
-            child: SizedBox(
-              width: 250,
-              child: Column(
-                children: [
-                const SizedBox(height: 40),
-                const Icon(Icons.cloud_circle, size: 64, color: Color(0xFFF6821F)),
-                const SizedBox(height: 16),
-                const Text('Zero Trust\nManager', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.2)),
-                const SizedBox(height: 40),
-                ListTile(
-                  leading: const Icon(Icons.dashboard, color: Color(0xFFF6821F)),
-                  title: const Text('Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
-                  selected: true,
-                  tileColor: const Color(0xFF1E293B),
-                  selectedTileColor: const Color(0xFF0F172A),
-                  onTap: () {},
-                ),
-                ListTile(
-                  leading: const Icon(Icons.dns, color: Colors.grey),
-                  title: const Text('DNS Editor', style: TextStyle(color: Colors.grey)),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen())),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.settings, color: Colors.grey),
-                  title: const Text('Settings', style: TextStyle(color: Colors.grey)),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
-                ),
-                ListTile(
-                  leading: Icon(
-                    _watcher.isEnabled ? Icons.visibility : Icons.visibility_off,
-                    color: _watcher.isEnabled ? const Color(0xFFF6821F) : Colors.grey,
-                  ),
-                  title: Text(
-                    'Watcher: ${_watcher.isEnabled ? "ON" : "OFF"} (${_watcher.watched.length})',
-                    style: TextStyle(color: _watcher.isEnabled ? const Color(0xFFF6821F) : Colors.grey),
-                  ),
-                  onTap: _toggleWatcher,
-                ),
-                ListTile(
-                  leading: const Icon(Icons.bug_report, color: Colors.redAccent),
-                  title: const Text('Kill Daemons', style: TextStyle(color: Colors.redAccent)),
-                  onTap: _killOrphanedDaemons,
-                ),
-                const Spacer(),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _isCloudflaredInstalled ? Icons.check_circle : Icons.error,
-                        color: _isCloudflaredInstalled ? Colors.green : Colors.redAccent,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(_isCloudflaredInstalled ? 'Daemon Ready' : 'Daemon Missing', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 1200;
+          return Row(
+            children: [
+              _buildSidebar(isWide: isWide),
+              Expanded(child: _buildMainContent(isWide: isWide)),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSidebar({required bool isWide}) {
+    return Material(
+      color: const Color(0xFF1E293B),
+      child: SizedBox(
+        width: isWide ? 250 : 60,
+        child: isWide ? _buildWideSidebar() : _buildNarrowSidebar(),
+      ),
+    );
+  }
+
+  Widget _buildWideSidebar() {
+    return Column(
+      children: [
+        const SizedBox(height: 40),
+        const Icon(Icons.cloud_circle, size: 64, color: Color(0xFFF6821F)),
+        const SizedBox(height: 16),
+        const Text('Zero Trust\nManager', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.2)),
+        const SizedBox(height: 40),
+        ListTile(
+          leading: const Icon(Icons.dashboard, color: Color(0xFFF6821F)),
+          title: const Text('Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
+          selected: true,
+          tileColor: const Color(0xFF1E293B),
+          selectedTileColor: const Color(0xFF0F172A),
+          onTap: () {},
+        ),
+        ListTile(
+          leading: const Icon(Icons.dns, color: Colors.grey),
+          title: const Text('DNS Editor', style: TextStyle(color: Colors.grey)),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.settings, color: Colors.grey),
+          title: const Text('Settings', style: TextStyle(color: Colors.grey)),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+        ),
+        ListTile(
+          leading: Icon(
+            _watcher.isEnabled ? Icons.visibility : Icons.visibility_off,
+            color: _watcher.isEnabled ? const Color(0xFFF6821F) : Colors.grey,
+          ),
+          title: Text(
+            'Watcher: ${_watcher.isEnabled ? "ON" : "OFF"} (${_watcher.watched.length})',
+            style: TextStyle(color: _watcher.isEnabled ? const Color(0xFFF6821F) : Colors.grey),
+          ),
+          onTap: _toggleWatcher,
+        ),
+        ListTile(
+          leading: const Icon(Icons.bug_report, color: Colors.redAccent),
+          title: const Text('Kill Daemons', style: TextStyle(color: Colors.redAccent)),
+          onTap: _killOrphanedDaemons,
+        ),
+        const Spacer(),
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Icon(
+                _isCloudflaredInstalled ? Icons.check_circle : Icons.error,
+                color: _isCloudflaredInstalled ? Colors.green : Colors.redAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(_isCloudflaredInstalled ? 'Daemon Ready' : 'Daemon Missing', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
           ),
         ),
-          
-          // Main Content
+      ],
+    );
+  }
+
+  Widget _buildNarrowSidebar() {
+    return Column(
+      children: [
+        const SizedBox(height: 16),
+        const Icon(Icons.cloud_circle, size: 32, color: Color(0xFFF6821F)),
+        const SizedBox(height: 24),
+        _sidebarIcon(Icons.dashboard, 'Dashboard', active: true),
+        const SizedBox(height: 8),
+        _sidebarIcon(Icons.dns, 'DNS Editor', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen()))),
+        const SizedBox(height: 8),
+        _sidebarIcon(Icons.settings, 'Settings', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
+        const SizedBox(height: 8),
+        _sidebarIcon(
+          _watcher.isEnabled ? Icons.visibility : Icons.visibility_off,
+          'Watcher',
+          active: _watcher.isEnabled,
+          onTap: _toggleWatcher,
+        ),
+        const SizedBox(height: 8),
+        _sidebarIcon(Icons.bug_report, 'Kill Daemons', onTap: _killOrphanedDaemons, active: true, activeColor: Colors.redAccent),
+        const Spacer(),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Icon(
+            _isCloudflaredInstalled ? Icons.check_circle : Icons.error,
+            color: _isCloudflaredInstalled ? Colors.green : Colors.redAccent,
+            size: 18,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sidebarIcon(IconData icon, String tooltip, {bool active = false, Color activeColor = const Color(0xFFF6821F), VoidCallback? onTap}) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFF0F172A) : null,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 20, color: active ? activeColor : Colors.grey),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainContent({required bool isWide}) {
+    return Padding(
+      padding: EdgeInsets.all(isWide ? 32.0 : 16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Overview', style: TextStyle(fontSize: isWide ? 28 : 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 24),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(32.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Overview', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 24),
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Left Panel: Active Ports
-                        Expanded(
-                          flex: 5,
-                          child: Builder(builder: (context) {
-                            final filteredPorts = _openPorts.where((p) => 
-                              p.port.toString().contains(_portsSearchQuery) || 
-                              p.processName.toLowerCase().contains(_portsSearchQuery)
-                            ).toList();
-                            
-                            return _buildCardPanel(
-                              title: 'Local Services',
-                              icon: Icons.computer,
-                              searchController: _portsSearchController,
-                              child: Column(
-                                children: [
-                                  if (_isLoadingPorts)
-                                    const LinearProgressIndicator(
-                                      minHeight: 2,
-                                      backgroundColor: Color(0xFF0F172A),
-                                      color: Color(0xFFF6821F),
-                                    ),
-                                  Expanded(
-                                    child: filteredPorts.isEmpty
-                                        ? Center(
-                                            child: Text(
-                                              _openPorts.isEmpty ? 'No listening ports.' : 'No matches found.',
-                                              style: const TextStyle(color: Colors.grey),
-                                            ),
-                                          )
-                                        : ListView.separated(
-                                          itemCount: filteredPorts.length,
-                                          separatorBuilder: (context, index) => const Divider(color: Color(0xFF334155), height: 1),
-                                          itemBuilder: (context, index) {
-                                            return _buildPortItem(filteredPorts[index]);
-                                          },
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-                        ),
-                        const SizedBox(width: 24),
-                        // Right Panel: Active Tunnels
-                        Expanded(
-                          flex: 7,
-                          child: Builder(builder: (context) {
-                            final tunnelWidgets = _buildTunnelItems();
-                            return _buildCardPanel(
-                              title: 'Active Tunnels',
-                              icon: Icons.public,
-                              searchController: _tunnelsSearchController,
-                              action: _isLoadingRemoteTunnels
-                                  ? const Padding(
-                                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                      child: SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Color(0xFFF6821F),
-                                        ),
-                                      ),
-                                    )
-                                  : IconButton(
-                                      icon: const Icon(Icons.refresh, size: 20, color: Colors.grey),
-                                      onPressed: _fetchRemoteTunnels,
-                                      tooltip: 'Refresh Cloudflare API Tunnels',
-                                    ),
-                              child: Column(
-                                children: [
-                                  if (_isLoadingRemoteTunnels)
-                                    const LinearProgressIndicator(
-                                      minHeight: 2,
-                                      backgroundColor: Color(0xFF0F172A),
-                                      color: Color(0xFFF6821F),
-                                    ),
-                                  Expanded(
-                                    child: tunnelWidgets.isEmpty
-                                        ? Center(
-                                            child: Text(
-                                              _remoteTunnels.isEmpty && _activeTunnels.isEmpty
-                                                  ? 'No active tunnels.'
-                                                  : 'No matches found.',
-                                              style: const TextStyle(color: Colors.grey),
-                                            ),
-                                          )
-                                        : ListView(children: tunnelWidgets),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_inspector != null) ...[
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 280,
-                      child: _buildInspectorPanel(),
-                    ),
-                  ],
-                ],
-              ),
+            child: isWide ? _buildWidePanels() : _buildNarrowPanels(),
+          ),
+          if (isWide && _inspector != null) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 280,
+              child: _buildInspectorPanel(),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWidePanels() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(flex: 5, child: _buildLocalServicesPanel()),
+        const SizedBox(width: 24),
+        Expanded(flex: 7, child: _buildTunnelsPanel()),
+      ],
+    );
+  }
+
+  Widget _buildNarrowPanels() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final panelHeight = (_inspector != null)
+            ? constraints.maxHeight * 0.42
+            : constraints.maxHeight * 0.48;
+        return SingleChildScrollView(
+          child: Column(
+            children: [
+              SizedBox(height: panelHeight, child: _buildLocalServicesPanel()),
+              const SizedBox(height: 12),
+              SizedBox(height: panelHeight, child: _buildTunnelsPanel()),
+              if (_inspector != null) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: constraints.maxHeight * 0.30,
+                  child: _buildInspectorPanel(),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLocalServicesPanel() {
+    final filteredPorts = _openPorts.where((p) =>
+        p.port.toString().contains(_portsSearchQuery) ||
+        p.processName.toLowerCase().contains(_portsSearchQuery)
+    ).toList();
+
+    return _buildCardPanel(
+      title: 'Local Services',
+      icon: Icons.computer,
+      searchController: _portsSearchController,
+      child: Column(
+        children: [
+          if (_isLoadingPorts)
+            const LinearProgressIndicator(
+              minHeight: 2,
+              backgroundColor: Color(0xFF0F172A),
+              color: Color(0xFFF6821F),
+            ),
+          Expanded(
+            child: filteredPorts.isEmpty
+                ? Center(
+                    child: Text(
+                      _openPorts.isEmpty ? 'No listening ports.' : 'No matches found.',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filteredPorts.length,
+                    separatorBuilder: (context, index) => const Divider(color: Color(0xFF334155), height: 1),
+                    itemBuilder: (context, index) => _buildPortItem(filteredPorts[index]),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTunnelsPanel() {
+    final tunnelWidgets = _buildTunnelItems();
+    return _buildCardPanel(
+      title: 'Active Tunnels',
+      icon: Icons.public,
+      searchController: _tunnelsSearchController,
+      action: _isLoadingRemoteTunnels
+          ? const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFFF6821F),
+                ),
+              ),
+            )
+          : IconButton(
+              icon: const Icon(Icons.refresh, size: 20, color: Colors.grey),
+              onPressed: _fetchRemoteTunnels,
+              tooltip: 'Refresh Cloudflare API Tunnels',
+            ),
+      child: Column(
+        children: [
+          if (_isLoadingRemoteTunnels)
+            const LinearProgressIndicator(
+              minHeight: 2,
+              backgroundColor: Color(0xFF0F172A),
+              color: Color(0xFFF6821F),
+            ),
+          Expanded(
+            child: tunnelWidgets.isEmpty
+                ? Center(
+                    child: Text(
+                      _remoteTunnels.isEmpty && _activeTunnels.isEmpty
+                          ? 'No active tunnels.'
+                          : 'No matches found.',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView(children: tunnelWidgets),
           ),
         ],
       ),
@@ -1148,88 +1235,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.visibility, color: Color(0xFFF6821F), size: 20),
-                const SizedBox(width: 12),
-                const Text('Request Inspector', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    'localhost:${inspector.listenPort} → localhost:${inspector.targetPort}',
-                    style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 140,
-                  height: 28,
-                  child: TextField(
-                    controller: _inspectorSearchController,
-                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white70),
-                    decoration: InputDecoration(
-                      hintText: 'Filter...',
-                      hintStyle: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace'),
-                      prefixIcon: const Icon(Icons.search, size: 14, color: Colors.grey),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                      filled: true,
-                      fillColor: const Color(0xFF0F172A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide.none),
-                      isDense: true,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isPanelWide = constraints.maxWidth > 750;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(20, 12, 20, isPanelWide ? 12 : 4),
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.visibility, color: Color(0xFFF6821F), size: 20),
+                            const SizedBox(width: 12),
+                            const Text('Request Inspector', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F172A),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'localhost:${inspector.listenPort} → localhost:${inspector.targetPort}',
+                            style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace'),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 140,
+                          height: 28,
+                          child: TextField(
+                            controller: _inspectorSearchController,
+                            style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white70),
+                            decoration: InputDecoration(
+                              hintText: 'Filter...',
+                              hintStyle: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace'),
+                              prefixIcon: const Icon(Icons.search, size: 14, color: Colors.grey),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                              filled: true,
+                              fillColor: const Color(0xFF0F172A),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide.none),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.green.withOpacity(0.4)),
+                          ),
+                          child: Text(
+                            _inspectorSearchQuery.isEmpty
+                                ? '${requests.length} REQ'
+                                : '${filtered.length}/${requests.length}',
+                            style: const TextStyle(fontSize: 10, color: Colors.greenAccent, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        if (isPanelWide) _buildInspectorActions(inspector, requests),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.green.withOpacity(0.4)),
-                  ),
-                  child: Text(
-                    _inspectorSearchQuery.isEmpty
-                        ? '${requests.length} REQ'
-                        : '${filtered.length}/${requests.length}',
-                    style: const TextStyle(fontSize: 10, color: Colors.greenAccent, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: 'http://localhost:${inspector.listenPort}'));
-                    _showToast('Inspector URL copied', isInfo: true);
-                  },
-                  icon: const Icon(Icons.copy, size: 14, color: Colors.grey),
-                  label: const Text('Copy', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: requests.isEmpty ? null : _clearInspectorLogs,
-                  icon: const Icon(Icons.cleaning_services, size: 16, color: Colors.grey),
-                  label: const Text('Clear', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: requests.isEmpty ? null : _saveHar,
-                  icon: const Icon(Icons.download, size: 16, color: Color(0xFFF6821F)),
-                  label: const Text('Save as HAR', style: TextStyle(color: Color(0xFFF6821F), fontSize: 12)),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: _stopInspector,
-                  icon: const Icon(Icons.stop_circle, size: 16, color: Colors.redAccent),
-                  label: const Text('Stop', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-                ),
-              ],
-            ),
+                  if (!isPanelWide)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                      child: _buildInspectorActions(inspector, requests),
+                    ),
+                ],
+              );
+            },
           ),
           const Divider(height: 1, color: Color(0xFF334155)),
           Expanded(
@@ -1252,6 +1333,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildInspectorActions(HttpInspector inspector, List<CapturedRequest> requests) {
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 4,
+      children: [
+        TextButton.icon(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: 'http://localhost:${inspector.listenPort}'));
+            _showToast('Inspector URL copied', isInfo: true);
+          },
+          icon: const Icon(Icons.copy, size: 14, color: Colors.grey),
+          label: const Text('Copy', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        ),
+        TextButton.icon(
+          onPressed: requests.isEmpty ? null : _clearInspectorLogs,
+          icon: const Icon(Icons.cleaning_services, size: 16, color: Colors.grey),
+          label: const Text('Clear', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        ),
+        TextButton.icon(
+          onPressed: requests.isEmpty ? null : _saveHar,
+          icon: const Icon(Icons.download, size: 16, color: Color(0xFFF6821F)),
+          label: const Text('Save as HAR', style: TextStyle(color: Color(0xFFF6821F), fontSize: 12)),
+        ),
+        TextButton.icon(
+          onPressed: _stopInspector,
+          icon: const Icon(Icons.stop_circle, size: 16, color: Colors.redAccent),
+          label: const Text('Stop', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+        ),
+      ],
     );
   }
 
