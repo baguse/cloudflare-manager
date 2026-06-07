@@ -223,6 +223,8 @@ class WebhookService {
           await _executeHttpWebhook(webhook, event, trigger, logId, startTime);
           break;
         case WebhookType.slack:
+          await _executeSlackWebhook(webhook, event, trigger, logId, startTime);
+          break;
         case WebhookType.discord:
           await _executeDiscordWebhook(webhook, event, trigger, logId, startTime);
           break;
@@ -535,6 +537,97 @@ class WebhookService {
     }
   }
 
+  Future<void> _executeSlackWebhook(
+    WebhookConfig webhook,
+    DaemonEvent event,
+    WebhookTrigger trigger,
+    String logId,
+    DateTime startTime,
+  ) async {
+    final webhookUrl = webhook.webhookUrl;
+    if (webhookUrl == null || webhookUrl.isEmpty) {
+      await _addLog(WebhookLog(
+        id: logId, webhookId: webhook.id, webhookName: webhook.name,
+        trigger: trigger, status: WebhookLogStatus.failed, error: 'Missing webhook URL',
+      ));
+      return;
+    }
+
+    final fields = <Map<String, dynamic>>[];
+    if (event.tunnelId != null && event.tunnelId!.isNotEmpty) {
+      fields.add({'title': 'Tunnel ID', 'value': event.tunnelId, 'short': true});
+    }
+    if (event.hostname != null && event.hostname!.isNotEmpty) {
+      fields.add({'title': 'Hostname', 'value': event.hostname, 'short': true});
+    }
+    if (event.port != null) {
+      fields.add({'title': 'Port', 'value': event.port.toString(), 'short': true});
+    }
+    if (event.reason != null && event.reason!.isNotEmpty) {
+      fields.add({'title': 'Reason', 'value': event.reason, 'short': false});
+    }
+    if (event.error != null && event.error!.isNotEmpty) {
+      fields.add({'title': 'Error', 'value': event.error, 'short': false});
+    }
+
+    final body = json.encode({
+      'text': 'Cloudflare Manager',
+      'attachments': [
+        {
+          'color': _slackColor(event.type),
+          'title': _discordTitle(event),
+          'text': _discordDescription(event),
+          if (fields.isNotEmpty) 'fields': fields,
+          'footer': 'Cloudflare Tunnel Manager',
+          'ts': (event.timestamp.millisecondsSinceEpoch / 1000).floor(),
+        }
+      ],
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse(webhookUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 10));
+
+      final duration = DateTime.now().difference(startTime).inMilliseconds;
+      final success = response.statusCode >= 200 && response.statusCode < 300;
+
+      await _addLog(WebhookLog(
+        id: logId, webhookId: webhook.id, webhookName: webhook.name,
+        trigger: trigger,
+        status: success ? WebhookLogStatus.success : WebhookLogStatus.failed,
+        statusCode: response.statusCode,
+        response: response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body,
+        durationMs: duration,
+      ));
+    } catch (e) {
+      final duration = DateTime.now().difference(startTime).inMilliseconds;
+      await _addLog(WebhookLog(
+        id: logId, webhookId: webhook.id, webhookName: webhook.name,
+        trigger: trigger, status: WebhookLogStatus.failed,
+        error: e.toString(), durationMs: duration,
+      ));
+    }
+  }
+
+  String _slackColor(DaemonEventType type) {
+    switch (type) {
+      case DaemonEventType.tunnelStarted:
+      case DaemonEventType.tunnelCreated:
+      case DaemonEventType.daemonStarted:
+        return 'good';
+      case DaemonEventType.tunnelStopped:
+      case DaemonEventType.tunnelDeleted:
+      case DaemonEventType.tunnelCrashed:
+        return 'danger';
+      case DaemonEventType.tunnelReconnected:
+      case DaemonEventType.daemonStopping:
+        return 'warning';
+    }
+  }
+
   String _discordTitle(DaemonEvent event) {
     switch (event.type) {
       case DaemonEventType.tunnelStarted: return 'Tunnel Started';
@@ -599,6 +692,8 @@ class WebhookService {
           await _executeHttpWebhook(webhook, testEvent, WebhookTrigger.tunnelStarted, logId, startTime);
           return true;
         case WebhookType.slack:
+          await _executeSlackWebhook(webhook, testEvent, WebhookTrigger.tunnelStarted, logId, startTime);
+          return true;
         case WebhookType.discord:
           await _executeDiscordWebhook(webhook, testEvent, WebhookTrigger.tunnelStarted, logId, startTime);
           return true;

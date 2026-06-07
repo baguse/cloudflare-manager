@@ -377,12 +377,11 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
         backgroundColor: const Color(0xFF2d2d2d),
         title: Text(widget.webhook == null ? 'New Webhook' : 'Edit Webhook'),
         actions: [
-          if (_selectedType == WebhookType.http)
-            TextButton.icon(
-              icon: _testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.science),
-              label: const Text('Test'),
-              onPressed: _testing ? null : _testWebhook,
-            ),
+          TextButton.icon(
+            icon: _testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.science),
+            label: const Text('Test'),
+            onPressed: _testing ? null : _testWebhook,
+          ),
           TextButton.icon(
             icon: _saving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save),
             label: const Text('Save'),
