@@ -221,7 +221,7 @@ class CloudflaredService {
     return {};
   }
 
-  static Future<void> registerAppTunnel(String tunnelId, int localPort, {String? token}) async {
+  static Future<void> registerAppTunnel(String tunnelId, int localPort, {String? token, String? hostname}) async {
     final file = _appTunnelMapFile();
     if (file == null) return;
     try {
@@ -232,9 +232,11 @@ class CloudflaredService {
       final String? existingToken = existing is Map ? existing['token'] as String? : null;
       final String? existingNotes = existing is Map ? existing['notes'] as String? : null;
       final String? existingTags = existing is Map ? existing['tags'] as String? : null;
+      final String? existingHostname = existing is Map ? existing['hostname'] as String? : null;
       map[tunnelId] = {
         'port': localPort,
         if (token != null) 'token': token else if (existingToken != null) 'token': existingToken,
+        if (hostname != null) 'hostname': hostname else if (existingHostname != null) 'hostname': existingHostname,
         if (existingNotes != null) 'notes': existingNotes,
         if (existingTags != null) 'tags': existingTags,
       };

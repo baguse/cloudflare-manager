@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'events.dart';
 import 'tunnel_runner.dart';
+import '../webhook_service.dart';
 
 class CloudflareDaemon {
   final String configPath;
@@ -15,6 +15,7 @@ class CloudflareDaemon {
   final List<Socket> _ipcClients = [];
   bool _running = false;
   final Completer<void> _shutdownCompleter = Completer<void>();
+  final Set<Future<void>> _pendingWebhooks = {};
 
   static const _socketName = 'cloudflare-manager.sock';
 
@@ -36,6 +37,7 @@ class CloudflareDaemon {
     if (_running) return;
     _running = true;
 
+    await WebhookService.instance.loadWebhooks();
     _emit(DaemonEvent(type: DaemonEventType.daemonStarted));
 
     await _loadTunnels();
@@ -55,6 +57,8 @@ class CloudflareDaemon {
       await runner.stop();
     }
     _runners.clear();
+
+    await _flushWebhooks();
 
     for (final client in _ipcClients) {
       await client.close();
@@ -124,7 +128,7 @@ class CloudflareDaemon {
     });
   }
 
-  void _handleIpcMessage(Socket client, String message) {
+  Future<void> _handleIpcMessage(Socket client, String message) async {
     try {
       final msg = json.decode(message.trim()) as Map<String, dynamic>;
       final cmd = msg['command'] as String?;
@@ -157,6 +161,46 @@ class CloudflareDaemon {
           }
           break;
 
+        case 'tunnel_bind':
+          final id = msg['tunnelId'] as String?;
+          final token = msg['token'] as String?;
+          final hostname = msg['hostname'] as String? ?? '';
+          final port = msg['port'] as int?;
+          if (id == null || token == null || port == null) {
+            _sendIpc(client, {'ok': false, 'error': 'Missing tunnelId, token, or port'});
+            break;
+          }
+          if (_runners.containsKey(id)) {
+            await _runners[id]!.stop();
+          }
+          final runner = TunnelRunner(
+            tunnelId: id,
+            token: token,
+            hostname: hostname,
+            port: port,
+            onEvent: _emit,
+          );
+          _runners[id] = runner;
+          await runner.start();
+          _sendIpc(client, {'ok': true, 'pid': runner.pid});
+          break;
+
+        case 'tunnel_unbind':
+          final id = msg['tunnelId'] as String?;
+          if (id == null) {
+            _sendIpc(client, {'ok': false, 'error': 'Missing tunnelId'});
+            break;
+          }
+          final r = _runners[id];
+          if (r != null) {
+            await r.stop();
+            _runners.remove(id);
+            _sendIpc(client, {'ok': true});
+          } else {
+            _sendIpc(client, {'ok': false, 'error': 'Tunnel not found'});
+          }
+          break;
+
         case 'tunnel_start':
           final id = msg['tunnelId'] as String?;
           final runner = id != null ? _runners[id] : null;
@@ -172,7 +216,8 @@ class CloudflareDaemon {
           final id = msg['tunnelId'] as String?;
           final runner = id != null ? _runners[id] : null;
           if (runner != null) {
-            runner.stop().then((_) => _sendIpc(client, {'ok': true}));
+            await runner.stop();
+            _sendIpc(client, {'ok': true});
           } else {
             _sendIpc(client, {'ok': false, 'error': 'tunnel not found'});
           }
@@ -192,7 +237,15 @@ class CloudflareDaemon {
 
         case 'shutdown':
           _sendIpc(client, {'ok': true});
-          stop();
+          stop().catchError((e) => print('[daemon] Stop error: $e'));
+          break;
+
+        case 'reload_webhooks':
+          WebhookService.instance.loadWebhooks().then((_) {
+            _sendIpc(client, {'ok': true, 'count': WebhookService.instance.webhooks.length});
+          }).catchError((e) {
+            _sendIpc(client, {'ok': false, 'error': e.toString()});
+          });
           break;
 
         default:
@@ -219,5 +272,20 @@ class CloudflareDaemon {
     }
 
     onEvent?.call(event);
+    
+    final future = WebhookService.instance.triggerWebhooks(event).catchError((e) {
+      print('[daemon] Webhook trigger error: $e');
+    });
+    _pendingWebhooks.add(future);
+    future.whenComplete(() => _pendingWebhooks.remove(future));
+  }
+
+  Future<void> _flushWebhooks({Duration timeout = const Duration(seconds: 10)}) async {
+    if (_pendingWebhooks.isEmpty) return;
+    try {
+      await Future.wait(_pendingWebhooks.toList()).timeout(timeout);
+    } catch (_) {
+      print('[daemon] Webhook flush timed out');
+    }
   }
 }

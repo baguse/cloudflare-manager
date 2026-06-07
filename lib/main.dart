@@ -10,6 +10,7 @@ import 'dart:io';
 import 'port_scanner.dart';
 import 'settings_screen.dart';
 import 'dns_editor_screen.dart';
+import 'webhook_screen.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
@@ -494,6 +495,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     setState(() {});
   }
 
+  Future<void> _ensureDaemon() async {
+    if (_isDaemonRunning) return;
+    _showToast('Starting daemon service...', isInfo: true);
+    await _startDaemon();
+    await Future.delayed(const Duration(seconds: 2));
+    await _checkDaemonStatus();
+  }
+
   Future<void> _startTunnel(int port) async {
     if (!_isCloudflaredInstalled) {
       _showToast('cloudflared is not installed!', isError: true);
@@ -527,16 +536,28 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       final dnsCreated = await CloudflareService.createTunnelDnsRecord(zone['id'], subdomain, tunnelId);
       if (!dnsCreated) throw Exception('Failed to create DNS record');
 
-      _showToast('Starting cloudflared...', isInfo: true);
-      final process = await CloudflaredService.startTokenTunnel(tunnelToken);
+      await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken, hostname: fullDomain);
 
-      await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken);
+      _showToast('Starting via daemon...', isInfo: true);
+      await _ensureDaemon();
+
+      final client = DaemonClient();
+      if (!await client.connect()) throw Exception('Daemon not reachable');
+      final bindResult = await client.bindTunnel(tunnelId, tunnelToken, fullDomain, port);
+      client.disconnect();
+
+      if (bindResult['ok'] != true) {
+        throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
+      }
+
+      final daemonPid = bindResult['pid'] as int?;
+
       _watcher.watch(
         tunnelId: tunnelId,
         port: port,
         hostname: fullDomain,
         token: tunnelToken,
-        currentPid: process.pid,
+        currentPid: daemonPid,
       );
 
       final activeTunnel = ActiveTunnel(
@@ -544,34 +565,27 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         name: 'tunnel-$subdomain-$port',
         localPort: port,
         url: 'https://$fullDomain',
-        process: process,
+        pid: daemonPid,
         logs: ValueNotifier<List<String>>([]),
       );
 
-      setState(() {
-        _activeTunnels.add(activeTunnel);
-      });
+      setState(() => _activeTunnels.add(activeTunnel));
 
-      process.stdout.transform(utf8.decoder).listen((data) {
-        activeTunnel.logs.value = [...activeTunnel.logs.value, data];
-      });
-
-      process.stderr.transform(utf8.decoder).listen((data) {
-        activeTunnel.logs.value = [...activeTunnel.logs.value, data];
-      });
-      
       _showToast('Tunnel $fullDomain is active!');
       _fetchRemoteTunnels();
-      _checkTunnelConnectivity();
+      Future.delayed(const Duration(seconds: 3), _checkTunnelConnectivity);
     } catch (e) {
       _showToast('Error: $e', isError: true);
     }
   }
 
-  void _stopTunnel(ActiveTunnel tunnel) {
-    tunnel.process.kill();
+  Future<void> _stopTunnel(ActiveTunnel tunnel) async {
+    tunnel.process?.kill();
     if (tunnel.tunnelId != null) {
       _watcher.unwatch(tunnel.tunnelId!);
+      _tunnelLocalProcess.remove(tunnel.tunnelId);
+      _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
+      _daemonClient.unbindTunnel(tunnel.tunnelId!).catchError((_) {});
     }
     setState(() => _activeTunnels.remove(tunnel));
     _showToast('Tunnel stopped', isInfo: true);
@@ -723,41 +737,44 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       final ok = await CloudflareService.configureTunnel(tunnelId, hostname, port);
       if (!ok) throw Exception('Failed to reconfigure tunnel');
 
-      _showToast('Starting cloudflared...', isInfo: true);
-      final process = await CloudflaredService.startTokenTunnel(token);
-      await CloudflaredService.registerAppTunnel(tunnelId, port, token: token);
+      await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
 
-      final activeTunnel = ActiveTunnel(
-        tunnelId: tunnelId,
-        name: 'tunnel-$hostname',
-        localPort: port,
-        url: 'https://$hostname',
-        process: process,
-        logs: ValueNotifier<List<String>>([]),
-      );
+      _showToast('Starting via daemon...', isInfo: true);
+      await _ensureDaemon();
 
-      setState(() {
-        _activeTunnels.add(activeTunnel);
-      });
+      final client = DaemonClient();
+      if (!await client.connect()) throw Exception('Daemon not reachable');
+      final bindResult = await client.bindTunnel(tunnelId, token, hostname, port);
+      client.disconnect();
 
-      process.stdout.transform(utf8.decoder).listen((data) {
-        activeTunnel.logs.value = [...activeTunnel.logs.value, data];
-      });
-      process.stderr.transform(utf8.decoder).listen((data) {
-        activeTunnel.logs.value = [...activeTunnel.logs.value, data];
-      });
+      if (bindResult['ok'] != true) {
+        throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
+      }
+
+      final daemonPid = bindResult['pid'] as int?;
 
       _watcher.watch(
         tunnelId: tunnelId,
         port: port,
         hostname: hostname,
         token: token,
-        currentPid: process.pid,
+        currentPid: daemonPid,
       );
+
+      final activeTunnel = ActiveTunnel(
+        tunnelId: tunnelId,
+        name: 'tunnel-$hostname',
+        localPort: port,
+        url: 'https://$hostname',
+        pid: daemonPid,
+        logs: ValueNotifier<List<String>>([]),
+      );
+
+      setState(() => _activeTunnels.add(activeTunnel));
 
       _showToast('Tunnel https://$hostname → :$port is active!');
       _fetchRemoteTunnels();
-      _checkTunnelConnectivity();
+      Future.delayed(const Duration(seconds: 3), _checkTunnelConnectivity);
     } catch (e) {
       _showToast('Bind failed: $e', isError: true);
     }
@@ -791,15 +808,25 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     _showToast('Deleting tunnel...', isInfo: true);
 
     if (tunnel != null) {
-      tunnel.process.kill();
+      tunnel.process?.kill();
+      if (tunnel.tunnelId != null) {
+        _tunnelLocalProcess.remove(tunnel.tunnelId!);
+        _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
+        try { await _daemonClient.unbindTunnel(tunnel.tunnelId!); } catch (_) {}
+      }
       setState(() => _activeTunnels.remove(tunnel));
     } else if (pid != null) {
       try {
         Process.killPid(pid);
+        _runningTunnels.removeWhere((t) => t.pid == pid);
+        if (tunnelId != null) {
+          try { await _daemonClient.unbindTunnel(tunnelId); } catch (_) {}
+        }
       } catch (e) {
       }
     }
 
+    await CloudflaredService.saveServiceEnabled(id, false);
     await CloudflaredService.unregisterAppTunnel(id);
     _watcher.unwatch(id);
     await CloudflareService.deleteTunnelDnsRecords(id);
@@ -962,6 +989,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen())),
         ),
         ListTile(
+          leading: const Icon(Icons.webhook, color: Colors.grey),
+          title: const Text('Webhooks', style: TextStyle(color: Colors.grey)),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen())),
+        ),
+        ListTile(
           leading: const Icon(Icons.settings, color: Colors.grey),
           title: const Text('Settings', style: TextStyle(color: Colors.grey)),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
@@ -1033,6 +1065,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         _sidebarIcon(Icons.dashboard, 'Dashboard', active: true),
         const SizedBox(height: 8),
         _sidebarIcon(Icons.dns, 'DNS Editor', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen()))),
+        const SizedBox(height: 8),
+        _sidebarIcon(Icons.webhook, 'Webhooks', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen()))),
         const SizedBox(height: 8),
         _sidebarIcon(Icons.settings, 'Settings', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
         const SizedBox(height: 8),
@@ -2194,7 +2228,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       }
       if (_selectedTunnelTag != null && _selectedTunnelTag!.isNotEmpty) continue;
 
-      renderedPids.add(a.process.pid);
+      renderedPids.add(a.pid ?? a.process?.pid ?? -1);
       items.add(_buildTunnelRow(
         tunnelId: null,
         title: a.url,
@@ -2399,6 +2433,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             onPressed: () async {
               try {
                 Process.killPid(t.pid);
+                _runningTunnels.removeWhere((r) => r.pid == t.pid);
                 _showToast('Killed cloudflared (pid ${t.pid})', isInfo: true);
                 _fetchRemoteTunnels();
               } catch (e) {
@@ -2651,6 +2686,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               onPressed: () async {
                 try {
                   Process.killPid(pid);
+                  if (tunnelId != null) {
+                    _tunnelLocalProcess.remove(tunnelId);
+                    _daemonClient.unbindTunnel(tunnelId).catchError((_) {});
+                  }
+                  _runningTunnels.removeWhere((r) => r.pid == pid);
                   _showToast('Killed cloudflared (pid $pid)', isInfo: true);
                   _fetchRemoteTunnels();
                 } catch (e) {
@@ -3284,7 +3324,8 @@ class ActiveTunnel {
   final String? name;
   final int localPort;
   String url;
-  Process process;
+  Process? process;
+  int? pid;
   final ValueNotifier<List<String>> logs;
 
   ActiveTunnel({
@@ -3292,12 +3333,14 @@ class ActiveTunnel {
     this.name,
     required this.localPort,
     required this.url,
-    required this.process,
+    this.process,
+    this.pid,
     required this.logs,
   });
 
-  void replaceProcess(Process newProcess) {
+  void replaceProcess(Process? newProcess) {
     process = newProcess;
+    if (newProcess != null) pid = newProcess.pid;
   }
 }
 

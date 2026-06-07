@@ -169,7 +169,7 @@ class TunnelServiceManager {
       if (connected) {
         await client.shutdown();
         client.disconnect();
-        await Future.delayed(const Duration(milliseconds: 500));
+        await Future.delayed(const Duration(seconds: 3));
       }
       
       if (Platform.isLinux) {

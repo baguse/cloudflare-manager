@@ -34,6 +34,7 @@ class TunnelRunner {
   List<String> get logs => List.unmodifiable(_logs);
   DateTime? get startedAt => _startedAt;
   int get restartCount => _restartCount;
+  int? get pid => _process?.pid;
 
   Future<void> start() async {
     if (_state == TunnelRunState.running) return;
@@ -123,6 +124,13 @@ class TunnelRunner {
     _addLog('Restarting in ${delay.inSeconds}s (attempt $_restartCount/$_maxRestarts)...');
     Timer(delay, () {
       if (_state == TunnelRunState.crashed) {
+        onEvent(DaemonEvent(
+          type: DaemonEventType.tunnelReconnected,
+          tunnelId: tunnelId,
+          hostname: hostname,
+          port: port,
+          reason: 'auto-restart attempt $_restartCount',
+        ));
         start();
       }
     });
@@ -188,5 +196,6 @@ class TunnelRunner {
     'restartCount': _restartCount,
     'startedAt': _startedAt?.toIso8601String(),
     'logCount': _logs.length,
+    if (_process?.pid != null) 'pid': _process!.pid,
   };
 }
