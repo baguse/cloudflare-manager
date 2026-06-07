@@ -224,6 +224,8 @@ class WebhookService {
           break;
         case WebhookType.slack:
         case WebhookType.discord:
+          await _executeDiscordWebhook(webhook, event, trigger, logId, startTime);
+          break;
         case WebhookType.telegram:
           _debugLog('${webhook.type.name} not yet implemented');
           await _addLog(WebhookLog(
@@ -331,6 +333,144 @@ class WebhookService {
     }
   }
 
+  int _discordColor(DaemonEventType type) {
+    switch (type) {
+      case DaemonEventType.tunnelStarted:
+      case DaemonEventType.tunnelCreated:
+      case DaemonEventType.daemonStarted:
+        return 65280; // green
+      case DaemonEventType.tunnelStopped:
+      case DaemonEventType.tunnelDeleted:
+      case DaemonEventType.tunnelCrashed:
+        return 16711680; // red
+      case DaemonEventType.tunnelReconnected:
+      case DaemonEventType.daemonStopping:
+        return 16753920; // orange
+    }
+  }
+
+  Future<void> _executeDiscordWebhook(
+    WebhookConfig webhook,
+    DaemonEvent event,
+    WebhookTrigger trigger,
+    String logId,
+    DateTime startTime,
+  ) async {
+    final webhookUrl = webhook.webhookUrl;
+    if (webhookUrl == null || webhookUrl.isEmpty) {
+      _debugLog('Discord webhook missing URL');
+      await _addLog(WebhookLog(
+        id: logId,
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        trigger: trigger,
+        status: WebhookLogStatus.failed,
+        error: 'Missing webhook URL',
+      ));
+      return;
+    }
+
+    final fields = <Map<String, dynamic>>[];
+    if (event.tunnelId != null && event.tunnelId!.isNotEmpty) {
+      fields.add({'name': 'Tunnel ID', 'value': event.tunnelId, 'inline': true});
+    }
+    if (event.hostname != null && event.hostname!.isNotEmpty) {
+      fields.add({'name': 'Hostname', 'value': event.hostname, 'inline': true});
+    }
+    if (event.port != null) {
+      fields.add({'name': 'Port', 'value': event.port.toString(), 'inline': true});
+    }
+    if (event.reason != null && event.reason!.isNotEmpty) {
+      fields.add({'name': 'Reason', 'value': event.reason, 'inline': false});
+    }
+    if (event.error != null && event.error!.isNotEmpty) {
+      fields.add({'name': 'Error', 'value': event.error, 'inline': false});
+    }
+
+    final body = json.encode({
+      'username': 'Cloudflare Manager',
+      'embeds': [
+        {
+          'title': _discordTitle(event),
+          'description': _discordDescription(event),
+          'color': _discordColor(event.type),
+          'fields': fields,
+          'timestamp': event.timestamp.toIso8601String(),
+          'footer': {'text': 'Cloudflare Tunnel Manager'},
+        }
+      ],
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse(webhookUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 10));
+
+      final duration = DateTime.now().difference(startTime).inMilliseconds;
+      final success = response.statusCode >= 200 && response.statusCode < 300;
+
+      await _addLog(WebhookLog(
+        id: logId,
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        trigger: trigger,
+        status: success ? WebhookLogStatus.success : WebhookLogStatus.failed,
+        statusCode: response.statusCode,
+        response: response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body,
+        durationMs: duration,
+      ));
+    } catch (e) {
+      final duration = DateTime.now().difference(startTime).inMilliseconds;
+      await _addLog(WebhookLog(
+        id: logId,
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        trigger: trigger,
+        status: WebhookLogStatus.failed,
+        error: e.toString(),
+        durationMs: duration,
+      ));
+    }
+  }
+
+  String _discordTitle(DaemonEvent event) {
+    switch (event.type) {
+      case DaemonEventType.tunnelStarted: return 'Tunnel Started';
+      case DaemonEventType.tunnelStopped: return 'Tunnel Stopped';
+      case DaemonEventType.tunnelCrashed: return 'Tunnel Crashed';
+      case DaemonEventType.tunnelReconnected: return 'Tunnel Reconnected';
+      case DaemonEventType.tunnelCreated: return 'Tunnel Created';
+      case DaemonEventType.tunnelDeleted: return 'Tunnel Deleted';
+      case DaemonEventType.daemonStarted: return 'Daemon Started';
+      case DaemonEventType.daemonStopping: return 'Daemon Stopping';
+    }
+  }
+
+  String _discordDescription(DaemonEvent event) {
+    final host = event.hostname?.isNotEmpty == true ? ' (${event.hostname})' : '';
+    final port = event.port != null ? ' on port ${event.port}' : '';
+    switch (event.type) {
+      case DaemonEventType.tunnelStarted:
+        return 'Tunnel${event.tunnelId != null ? " ${event.tunnelId}" : ""}$host is now running$port';
+      case DaemonEventType.tunnelStopped:
+        return 'Tunnel${event.tunnelId != null ? " ${event.tunnelId}" : ""}$host has been stopped';
+      case DaemonEventType.tunnelCrashed:
+        return 'Tunnel${event.tunnelId != null ? " ${event.tunnelId}" : ""}$host crashed: ${event.reason ?? ""}';
+      case DaemonEventType.tunnelReconnected:
+        return 'Tunnel${event.tunnelId != null ? " ${event.tunnelId}" : ""}$host reconnected';
+      case DaemonEventType.tunnelCreated:
+        return 'New tunnel${event.tunnelId != null ? " ${event.tunnelId}" : ""} created$host$port';
+      case DaemonEventType.tunnelDeleted:
+        return 'Tunnel${event.tunnelId != null ? " ${event.tunnelId}" : ""}$host deleted';
+      case DaemonEventType.daemonStarted:
+        return 'Cloudflare daemon started';
+      case DaemonEventType.daemonStopping:
+        return 'Cloudflare daemon is stopping';
+    }
+  }
+
   String _replacePlaceholders(String template, DaemonEvent event) {
     var result = template;
     result = result.replaceAll('{{event}}', event.eventName);
@@ -360,6 +500,8 @@ class WebhookService {
           return true;
         case WebhookType.slack:
         case WebhookType.discord:
+          await _executeDiscordWebhook(webhook, testEvent, WebhookTrigger.tunnelStarted, logId, startTime);
+          return true;
         case WebhookType.telegram:
           _debugLog('Test not available for ${webhook.type.name}');
           return false;

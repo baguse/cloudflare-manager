@@ -474,14 +474,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     final newProcess = event.newProcess;
     if (newProcess != null) {
       final id = event.tunnelId;
-      final idx = _activeTunnels.indexWhere((t) => t.tunnelId == id);
-      if (idx >= 0) {
-        _activeTunnels[idx].replaceProcess(newProcess);
+      final tunnel = _activeTunnels.cast<ActiveTunnel?>().firstWhere(
+        (t) => t?.tunnelId == id,
+        orElse: () => null,
+      );
+      if (tunnel != null) {
+        tunnel.replaceProcess(newProcess);
         newProcess.stdout.transform(utf8.decoder).listen((data) {
-          _activeTunnels[idx].logs.value = [..._activeTunnels[idx].logs.value, data];
+          tunnel.logs.value = [...tunnel.logs.value, data];
         });
         newProcess.stderr.transform(utf8.decoder).listen((data) {
-          _activeTunnels[idx].logs.value = [..._activeTunnels[idx].logs.value, data];
+          tunnel.logs.value = [...tunnel.logs.value, data];
         });
       }
     }
@@ -498,13 +501,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   void _fireWebhook(DaemonEventType type, {String? tunnelId, String? hostname, int? port}) {
-    WebhookService.instance.loadWebhooks().catchError((_) {});
-    WebhookService.instance.triggerWebhooks(DaemonEvent(
-      type: type,
-      tunnelId: tunnelId,
-      hostname: hostname,
-      port: port,
-    )).catchError((e) => print('[webhook] $e'));
+    WebhookService.instance.loadWebhooks().then((_) {
+      WebhookService.instance.triggerWebhooks(DaemonEvent(
+        type: type,
+        tunnelId: tunnelId,
+        hostname: hostname,
+        port: port,
+      ));
+    }).catchError((e) {
+      _showToast('Webhook error: $e', isError: true);
+    });
   }
 
   Future<void> _ensureDaemon() async {
@@ -599,7 +605,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       _watcher.unwatch(tunnel.tunnelId!);
       _tunnelLocalProcess.remove(tunnel.tunnelId);
       _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
-      _daemonClient.unbindTunnel(tunnel.tunnelId!).catchError((_) {});
+      _daemonClient.unbindTunnel(tunnel.tunnelId!).catchError((_) => <String, dynamic>{});
     }
     setState(() => _activeTunnels.remove(tunnel));
     _showToast('Tunnel stopped', isInfo: true);
@@ -864,6 +870,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     final success = await CloudflareService.deleteTunnel(tunnelId);
     if (success) {
       _showToast('Tunnel and DNS record deleted.');
+      _fireWebhook(DaemonEventType.tunnelDeleted, tunnelId: tunnelId);
     } else {
       _showToast('Failed to delete tunnel.', isError: true);
     }
@@ -2703,7 +2710,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   Process.killPid(pid);
                   if (tunnelId != null) {
                     _tunnelLocalProcess.remove(tunnelId);
-                    _daemonClient.unbindTunnel(tunnelId).catchError((_) {});
+                    _daemonClient.unbindTunnel(tunnelId).catchError((_) => <String, dynamic>{});
                   }
                   _runningTunnels.removeWhere((r) => r.pid == pid);
                   _showToast('Killed cloudflared (pid $pid)', isInfo: true);

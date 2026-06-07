@@ -147,6 +147,13 @@ class _WebhookScreenState extends State<WebhookScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                if (webhook.webhookUrl != null)
+                  Text(
+                    webhook.webhookUrl!,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 Text(
                   '${webhook.triggers.length} trigger(s)',
                   style: const TextStyle(fontSize: 11, color: Colors.grey),
@@ -243,6 +250,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
   late TextEditingController _nameController;
   late TextEditingController _urlController;
   late TextEditingController _bodyTemplateController;
+  late TextEditingController _webhookUrlController;
   
   late WebhookType _selectedType;
   late HttpMethod _selectedMethod;
@@ -258,6 +266,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
     _nameController = TextEditingController(text: webhook?.name ?? '');
     _urlController = TextEditingController(text: webhook?.url ?? '');
     _bodyTemplateController = TextEditingController(text: webhook?.bodyTemplate ?? '');
+    _webhookUrlController = TextEditingController(text: webhook?.webhookUrl ?? '');
     _selectedType = webhook?.type ?? WebhookType.http;
     _selectedMethod = webhook?.method ?? HttpMethod.post;
     _selectedTriggers = webhook?.triggers.toSet() ?? {};
@@ -269,6 +278,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
     _nameController.dispose();
     _urlController.dispose();
     _bodyTemplateController.dispose();
+    _webhookUrlController.dispose();
     super.dispose();
   }
 
@@ -291,6 +301,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
       method: _selectedMethod,
       headers: _headers.isNotEmpty ? _headers : null,
       bodyTemplate: _bodyTemplateController.text.trim().isEmpty ? null : _bodyTemplateController.text.trim(),
+      webhookUrl: _webhookUrlController.text.trim().isEmpty ? null : _webhookUrlController.text.trim(),
     );
 
     if (widget.webhook != null) {
@@ -316,6 +327,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
       method: _selectedMethod,
       headers: _headers.isNotEmpty ? _headers : null,
       bodyTemplate: _bodyTemplateController.text.trim().isEmpty ? null : _bodyTemplateController.text.trim(),
+      webhookUrl: _webhookUrlController.text.trim().isEmpty ? null : _webhookUrlController.text.trim(),
     );
 
     final success = await WebhookService.instance.testWebhook(webhook);
@@ -387,6 +399,22 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
               onChanged: (v) => setState(() => _selectedType = v!),
             ),
             const SizedBox(height: 16),
+            if (_selectedType == WebhookType.discord || _selectedType == WebhookType.slack || _selectedType == WebhookType.telegram) ...[
+              TextFormField(
+                controller: _webhookUrlController,
+                decoration: InputDecoration(
+                  labelText: '${_selectedType.name[0].toUpperCase()}${_selectedType.name.substring(1)} Webhook URL',
+                  border: const OutlineInputBorder(),
+                  hintText: 'https://hooks.slack.com/... or https://discord.com/api/webhooks/...',
+                ),
+                validator: (v) {
+                  if (v?.trim().isEmpty == true) return 'Required';
+                  if (!v!.startsWith('http')) return 'Must start with http:// or https://';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
             if (_selectedType == WebhookType.http) ...[
               TextFormField(
                 controller: _urlController,
