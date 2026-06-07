@@ -309,6 +309,38 @@ class CloudflaredService {
     return {};
   }
 
+  static Future<void> saveServiceEnabled(String tunnelId, bool enabled) async {
+    final file = _appTunnelMapFile();
+    if (file == null) return;
+    try {
+      final content = await file.exists() ? await file.readAsString() : '{}';
+      final data = json.decode(content);
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final existing = map[tunnelId];
+      map[tunnelId] = {
+        if (existing is Map) ...existing,
+        'serviceEnabled': enabled,
+      };
+      await file.parent.create(recursive: true);
+      await file.writeAsString(json.encode(map));
+    } catch (e) {
+      print('Error saving service enabled: $e');
+    }
+  }
+
+  static Future<bool> readServiceEnabled(String tunnelId) async {
+    final file = _appTunnelMapFile();
+    if (file == null) return false;
+    try {
+      if (!await file.exists()) return false;
+      final data = json.decode(await file.readAsString());
+      if (data is Map && data[tunnelId] is Map) {
+        return data[tunnelId]['serviceEnabled'] == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   static Future<void> unregisterAppTunnel(String tunnelId) async {
     final file = _appTunnelMapFile();
     if (file == null) return;

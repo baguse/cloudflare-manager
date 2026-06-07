@@ -19,6 +19,8 @@ import 'tunnel_watcher.dart';
 import 'http_inspector.dart';
 import 'har_exporter.dart';
 import 'tray_service.dart';
+import 'tunnel_service_manager.dart';
+import 'daemon/ipc_client.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:brotli/brotli.dart';
@@ -97,11 +99,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   bool _isLoadingRemoteTunnels = false;
   bool _isCloudflaredInstalled = false;
   Timer? _refreshTimer;
-  Timer? _healthTimer;
+  Timer? _connectivityTimer;
   Set<int> _previousPorts = {};
   Set<int> _offeredPorts = {};
   int? _autoBindMinPort;
   int? _autoBindMaxPort;
+  bool _isDaemonRunning = false;
+  final DaemonClient _daemonClient = DaemonClient();
   final _secureStorage = const FlutterSecureStorage();
 
   final _portsSearchController = TextEditingController();
@@ -118,6 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     windowManager.addListener(this);
     TrayService.instance.init();
     _checkCloudflared();
+    _checkDaemonStatus();
     _fetchPorts();
     _restoreInspector();
     _bootstrap();
@@ -125,9 +130,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchPorts();
       _fetchRemoteTunnels();
+      _checkDaemonStatus();
     });
-    _healthTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      _checkTunnelHealth();
+    _connectivityTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _checkTunnelConnectivity();
     });
 
     _portsSearchController.addListener(() {
@@ -153,10 +159,68 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     if (mounted) setState(() => _isCloudflaredInstalled = isInstalled);
   }
 
+  Future<void> _checkDaemonStatus() async {
+    final running = await _daemonClient.isDaemonRunning;
+    if (mounted) setState(() => _isDaemonRunning = running);
+  }
+
+  Future<void> _startDaemon() async {
+    final installed = await TunnelServiceManager.instance.isServiceInstalled();
+    if (!installed) {
+      final error = await TunnelServiceManager.instance.installService();
+      if (error != null) {
+        _showToast('Failed to install service: $error', isError: true);
+        await _checkDaemonStatus();
+        return;
+      }
+      _showToast('Service installed and started', isInfo: true);
+    } else {
+      final error = await TunnelServiceManager.instance.startDaemon();
+      if (error != null) {
+        _showToast('Failed to start daemon: $error', isError: true);
+      } else {
+        _showToast('Daemon started', isInfo: true);
+      }
+    }
+    await Future.delayed(const Duration(seconds: 2));
+    await _checkDaemonStatus();
+  }
+
+  Future<void> _stopDaemon() async {
+    final error = await TunnelServiceManager.instance.stopDaemon();
+    if (error != null) {
+      _showToast('Failed to stop daemon: $error', isError: true);
+    } else {
+      _showToast('Daemon stopped', isInfo: true);
+    }
+    await _checkDaemonStatus();
+  }
+
+  Future<void> _performServiceToggle(String tunnelId, bool enabled) async {
+    final token = await CloudflaredService.readAppTunnelToken(tunnelId);
+    if (token == null) {
+      _showToast('No token stored. Create tunnel from the app first.', isError: true);
+      return;
+    }
+    await CloudflaredService.saveServiceEnabled(tunnelId, enabled);
+    String? error;
+    if (enabled) {
+      error = await TunnelServiceManager.instance.installService();
+    } else {
+      error = await TunnelServiceManager.instance.stopDaemon();
+    }
+    if (error != null) {
+      _showToast('Error: $error', isError: true);
+      return;
+    }
+    if (mounted) setState(() {});
+    _showToast(enabled ? 'Service installed' : 'Service stopped', isInfo: true);
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _healthTimer?.cancel();
+    _connectivityTimer?.cancel();
     _watcherSub?.cancel();
     _watcher.stop();
     _inspectorSub?.cancel();
@@ -261,6 +325,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       if (entry.value.tags != null) configs[id]!['tags'] = entry.value.tags!;
     }
 
+    for (final id in configs.keys) {
+      final enabled = await CloudflaredService.readServiceEnabled(id);
+      if (enabled) configs[id]!['serviceEnabled'] = 'true';
+    }
+
     if (mounted) {
       setState(() {
         _openPorts = ports;
@@ -275,7 +344,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         _isLoadingRemoteTunnels = false;
       });
     }
-    _checkTunnelHealth();
+    _checkTunnelConnectivity();
   }
 
   List<String> _collectHealthCheckUrls() {
@@ -293,7 +362,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     return urls.toList();
   }
 
-  Future<void> _checkTunnelHealth() async {
+  Future<void> _checkTunnelConnectivity() async {
     if (_isCheckingHealth) return;
     final urls = _collectHealthCheckUrls();
     if (urls.isEmpty) return;
@@ -355,6 +424,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       final port = entry.value.port;
       final token = entry.value.token;
       if (token == null) continue;
+
+      final serviceEnabled = await CloudflaredService.readServiceEnabled(tunnelId);
+      if (serviceEnabled) continue;
 
       final cfg = _tunnelConfigs[tunnelId];
       final hostname = cfg?['hostname'];
@@ -480,7 +552,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       
       _showToast('Tunnel $fullDomain is active!');
       _fetchRemoteTunnels();
-      _checkTunnelHealth();
+      _checkTunnelConnectivity();
     } catch (e) {
       _showToast('Error: $e', isError: true);
     }
@@ -675,7 +747,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       _showToast('Tunnel https://$hostname → :$port is active!');
       _fetchRemoteTunnels();
-      _checkTunnelHealth();
+      _checkTunnelConnectivity();
     } catch (e) {
       _showToast('Bind failed: $e', isError: true);
     }
@@ -899,6 +971,23 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           leading: const Icon(Icons.bug_report, color: Colors.redAccent),
           title: const Text('Kill Daemons', style: TextStyle(color: Colors.redAccent)),
           onTap: _killOrphanedDaemons,
+        ),
+        ListTile(
+          leading: Icon(Icons.dns, color: _isDaemonRunning ? Colors.green : Colors.grey),
+          title: Text(
+            'Daemon: ${_isDaemonRunning ? "Running" : "Stopped"}',
+            style: TextStyle(color: _isDaemonRunning ? Colors.green : Colors.grey),
+          ),
+          subtitle: const Text(
+            'User-level service',
+            style: TextStyle(fontSize: 10, color: Colors.grey),
+          ),
+          trailing: IconButton(
+            icon: Icon(_isDaemonRunning ? Icons.stop : Icons.play_arrow, size: 20),
+            color: _isDaemonRunning ? Colors.redAccent : Colors.green,
+            onPressed: _isDaemonRunning ? _stopDaemon : _startDaemon,
+          ),
+          onTap: _isDaemonRunning ? _stopDaemon : _startDaemon,
         ),
         const Spacer(),
         Padding(
@@ -2475,6 +2564,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               tooltip: 'Edit notes & tags',
               onPressed: () => _showNotesDialog(tunnelId),
             ),
+          if (tunnelId != null)
+            IconButton(
+              icon: Icon(Icons.shield, size: 20, color: _tunnelConfigs[tunnelId]?['serviceEnabled'] == 'true' ? Colors.green : Colors.grey),
+              tooltip: 'Service mode',
+              onPressed: () => _showServiceDialog(tunnelId),
+            ),
           if (isLocal && tunnel != null) ...[
             IconButton(
               icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
@@ -2966,6 +3061,90 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               ],
             ),
           ),
+        );
+      },
+    );
+  }
+
+  void _showServiceDialog(String tunnelId) async {
+    final installed = await TunnelServiceManager.instance.isServiceInstalled();
+    final running = await TunnelServiceManager.instance.isDaemonRunning();
+    final cfg = _tunnelConfigs[tunnelId] ?? {};
+    final hostname = cfg['hostname'] ?? '';
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final serviceEnabled = _tunnelConfigs[tunnelId]?['serviceEnabled'] == 'true';
+            return Dialog(
+              backgroundColor: const Color(0xFF0F172A),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Container(
+                width: 360,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.shield, color: Color(0xFFF6821F), size: 20),
+                        const SizedBox(width: 10),
+                        const Text('Service Mode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(hostname, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Icon(
+                          running ? Icons.check_circle : (installed ? Icons.pause_circle : Icons.cancel),
+                          color: running ? Colors.green : (installed ? Colors.orange : Colors.grey),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          running ? 'Service running' : (installed ? 'Service installed (stopped)' : 'Not registered'),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: running ? Colors.green : (installed ? Colors.orange : Colors.grey),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      title: const Text('Run as system service', style: TextStyle(fontSize: 14)),
+                      subtitle: const Text('Survives app exit & reboots', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      value: serviceEnabled,
+                      activeThumbColor: const Color(0xFFF6821F),
+                      onChanged: (v) {
+                        _tunnelConfigs[tunnelId] ??= {};
+                        _tunnelConfigs[tunnelId]!['serviceEnabled'] = v.toString();
+                        setDialogState(() {});
+                        if (mounted) setState(() {});
+                        _performServiceToggle(tunnelId, v);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      TunnelServiceManager.instance.privilegeNote(),
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
