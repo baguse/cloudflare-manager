@@ -169,8 +169,9 @@ class TunnelServiceManager {
       if (connected) {
         await client.shutdown();
         client.disconnect();
-        return null;
+        await Future.delayed(const Duration(milliseconds: 500));
       }
+      
       if (Platform.isLinux) {
         final result = await Process.run('systemctl', ['--user', 'stop', _linuxUnitName]);
         if (result.exitCode != 0) return result.stderr.toString().trim();
