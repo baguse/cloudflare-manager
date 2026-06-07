@@ -24,6 +24,7 @@ enum WebhookTrigger {
   tunnelDeleted,
   daemonStarted,
   daemonStopping,
+  rateAlert,
 }
 
 class WebhookConfig {

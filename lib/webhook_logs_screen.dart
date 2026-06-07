@@ -361,6 +361,8 @@ class _WebhookLogsScreenState extends State<WebhookLogsScreen> {
         return 'Daemon Started';
       case WebhookTrigger.daemonStopping:
         return 'Daemon Stopping';
+      case WebhookTrigger.rateAlert:
+        return 'Rate Alert';
     }
   }
 

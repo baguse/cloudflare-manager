@@ -11,7 +11,9 @@ import 'port_scanner.dart';
 import 'settings_screen.dart';
 import 'dns_editor_screen.dart';
 import 'webhook_screen.dart';
+import 'rate_alert_screen.dart';
 import 'webhook_service.dart';
+import 'rate_alert_service.dart';
 import 'daemon/events.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
@@ -131,6 +133,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     _restoreInspector();
     _bootstrap();
     _loadPortRange();
+    RateAlertService.instance.loadAlerts().then((_) => RateAlertService.instance.startChecker());
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchPorts();
       _fetchRemoteTunnels();
@@ -1016,6 +1019,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen())),
         ),
         ListTile(
+          leading: const Icon(Icons.speed, color: Colors.grey),
+          title: const Text('Rate Alerts', style: TextStyle(color: Colors.grey)),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen())),
+        ),
+        ListTile(
           leading: const Icon(Icons.settings, color: Colors.grey),
           title: const Text('Settings', style: TextStyle(color: Colors.grey)),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
@@ -1089,6 +1097,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         _sidebarIcon(Icons.dns, 'DNS Editor', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen()))),
         const SizedBox(height: 8),
         _sidebarIcon(Icons.webhook, 'Webhooks', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen()))),
+        const SizedBox(height: 8),
+        _sidebarIcon(Icons.speed, 'Rate Alerts', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen()))),
         const SizedBox(height: 8),
         _sidebarIcon(Icons.settings, 'Settings', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
         const SizedBox(height: 8),

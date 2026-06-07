@@ -210,6 +210,8 @@ class WebhookService {
         return WebhookTrigger.daemonStarted;
       case DaemonEventType.daemonStopping:
         return WebhookTrigger.daemonStopping;
+      case DaemonEventType.rateAlert:
+        return WebhookTrigger.rateAlert;
     }
   }
 
@@ -338,6 +340,7 @@ class WebhookService {
         return 16711680; // red
       case DaemonEventType.tunnelReconnected:
       case DaemonEventType.daemonStopping:
+      case DaemonEventType.rateAlert:
         return 16753920; // orange
     }
   }
@@ -534,6 +537,8 @@ class WebhookService {
         return '\u267B'; // ♻️
       case DaemonEventType.daemonStopping:
         return '\u23F9\uFE0F'; // ⏹️
+      case DaemonEventType.rateAlert:
+        return '\u26A0\uFE0F'; // ⚠️
     }
   }
 
@@ -624,6 +629,7 @@ class WebhookService {
         return 'danger';
       case DaemonEventType.tunnelReconnected:
       case DaemonEventType.daemonStopping:
+      case DaemonEventType.rateAlert:
         return 'warning';
     }
   }
@@ -638,6 +644,7 @@ class WebhookService {
       case DaemonEventType.tunnelDeleted: return 'Tunnel Deleted';
       case DaemonEventType.daemonStarted: return 'Daemon Started';
       case DaemonEventType.daemonStopping: return 'Daemon Stopping';
+      case DaemonEventType.rateAlert: return 'Rate Alert';
     }
   }
 
@@ -661,6 +668,8 @@ class WebhookService {
         return 'Cloudflare daemon started';
       case DaemonEventType.daemonStopping:
         return 'Cloudflare daemon is stopping';
+      case DaemonEventType.rateAlert:
+        return event.reason ?? 'Rate threshold exceeded';
     }
   }
 

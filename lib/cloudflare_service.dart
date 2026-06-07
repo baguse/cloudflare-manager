@@ -380,18 +380,17 @@ class CloudflareService {
   static Future<Map<String, int>> fetchTunnelAnalytics(String zoneId, String hostname, {int daysBack = 30}) async {
     try {
       final headers = await _getHeaders();
-      final since = DateTime.now().subtract(Duration(days: daysBack)).toIso8601String();
+      final since = DateTime.now().toUtc().subtract(Duration(days: daysBack)).toIso8601String();
       final query = '''
 query {
   viewer {
     zones(filter: { zoneTag: "$zoneId" }) {
-      httpRequests1hGroups(
-        filter: { host: "$hostname", datetime_gt: "$since" }
+      httpRequestsAdaptiveGroups(
+        filter: { datetime_gt: "$since", clientRequestHTTPHost: "$hostname" }
         limit: 10000
-        order: [datetime_ASC]
       ) {
         dimensions { datetime }
-        sum { requests }
+        count
       }
     }
   }
@@ -403,27 +402,90 @@ query {
         body: json.encode({'query': query}),
       );
 
+      print('[analytics] fetchTunnelAnalytics status: ${resp.statusCode} for $hostname');
+
       if (resp.statusCode != 200) return {};
 
       final body = json.decode(resp.body);
       final zones = body?['data']?['viewer']?['zones'] as List?;
       if (zones == null || zones.isEmpty) return {};
 
-      final groups = zones[0]['httpRequests1hGroups'] as List?;
+      final groups = zones[0]['httpRequestsAdaptiveGroups'] as List?;
       if (groups == null) return {};
 
       final out = <String, int>{};
       for (final g in groups) {
         final datetime = g['dimensions']?['datetime'] as String?;
-        final requests = g['sum']?['requests'] as int?;
+        final requests = g['count'] as int?;
         if (datetime != null && requests != null) {
           final date = datetime.substring(0, 10);
           out[date] = (out[date] ?? 0) + requests;
         }
       }
+      print('[analytics] fetchTunnelAnalytics $hostname: ${out.length} day(s) of data, total=${out.values.fold(0, (a, b) => a + b)}');
       return out;
     } catch (_) {
       return {};
+    }
+  }
+
+  static Future<int?> fetchHourlyRequestCount(String zoneId, String hostname) async {
+    try {
+      final headers = await _getHeaders();
+      final since = DateTime.now().toUtc().subtract(const Duration(hours: 2)).toIso8601String();
+      final query = '''
+query {
+  viewer {
+    zones(filter: { zoneTag: "$zoneId" }) {
+      httpRequestsAdaptiveGroups(
+        filter: { datetime_gt: "$since", clientRequestHTTPHost: "$hostname" }
+        limit: 10
+      ) {
+        count
+      }
+    }
+  }
+}''';
+
+      final resp = await http.post(
+        Uri.parse('$baseUrl/graphql'),
+        headers: {...headers, 'Content-Type': 'application/json'},
+        body: json.encode({'query': query}),
+      ).timeout(const Duration(seconds: 15));
+
+      print('[analytics] GraphQL status: ${resp.statusCode}');
+      if (resp.body.length > 1000) {
+        print('[analytics] GraphQL body: ${resp.body.substring(0, 1000)}...');
+      } else {
+        print('[analytics] GraphQL body: $resp.body');
+      }
+
+      if (resp.statusCode != 200) return null;
+
+      final body = json.decode(resp.body);
+      final errors = body?['errors'] as List?;
+      if (errors != null && errors.isNotEmpty) {
+        print('[analytics] Permission error — API token needs Zone > Analytics > Read permission');
+        return null;
+      }
+
+      final zones = body?['data']?['viewer']?['zones'] as List?;
+      if (zones == null || zones.isEmpty) {
+        print('[analytics] No zones for $hostname');
+        return null;
+      }
+
+      final groups = zones[0]['httpRequestsAdaptiveGroups'] as List?;
+      if (groups == null || groups.isEmpty) {
+        print('[analytics] No data for $hostname');
+        return null;
+      }
+
+      final requests = (groups[0]['count'] as int?) ?? 0;
+      print('[analytics] $hostname: $requests req/h');
+      return requests;
+    } catch (_) {
+      return null;
     }
   }
 }

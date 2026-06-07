@@ -9,6 +9,7 @@ enum DaemonEventType {
   tunnelDeleted,
   daemonStarted,
   daemonStopping,
+  rateAlert,
 }
 
 class DaemonEvent {
@@ -48,6 +49,8 @@ class DaemonEvent {
         return 'daemon.started';
       case DaemonEventType.daemonStopping:
         return 'daemon.stopping';
+      case DaemonEventType.rateAlert:
+        return 'rate.alert';
     }
   }
 
