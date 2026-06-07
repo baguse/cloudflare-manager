@@ -105,6 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   int? _autoBindMinPort;
   int? _autoBindMaxPort;
   bool _isDaemonRunning = false;
+  bool _isDaemonLoading = false;
   final DaemonClient _daemonClient = DaemonClient();
   final _secureStorage = const FlutterSecureStorage();
 
@@ -165,12 +166,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Future<void> _startDaemon() async {
+    if (_isDaemonLoading) return;
+    setState(() => _isDaemonLoading = true);
+    
     final installed = await TunnelServiceManager.instance.isServiceInstalled();
     if (!installed) {
       final error = await TunnelServiceManager.instance.installService();
       if (error != null) {
         _showToast('Failed to install service: $error', isError: true);
         await _checkDaemonStatus();
+        setState(() => _isDaemonLoading = false);
         return;
       }
       _showToast('Service installed and started', isInfo: true);
@@ -184,9 +189,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     }
     await Future.delayed(const Duration(seconds: 2));
     await _checkDaemonStatus();
+    setState(() => _isDaemonLoading = false);
   }
 
   Future<void> _stopDaemon() async {
+    if (_isDaemonLoading) return;
+    setState(() => _isDaemonLoading = true);
+    
     final error = await TunnelServiceManager.instance.stopDaemon();
     if (error != null) {
       _showToast('Failed to stop daemon: $error', isError: true);
@@ -194,6 +203,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       _showToast('Daemon stopped', isInfo: true);
     }
     await _checkDaemonStatus();
+    setState(() => _isDaemonLoading = false);
   }
 
   Future<void> _performServiceToggle(String tunnelId, bool enabled) async {
@@ -982,12 +992,18 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             'User-level service',
             style: TextStyle(fontSize: 10, color: Colors.grey),
           ),
-          trailing: IconButton(
-            icon: Icon(_isDaemonRunning ? Icons.stop : Icons.play_arrow, size: 20),
-            color: _isDaemonRunning ? Colors.redAccent : Colors.green,
-            onPressed: _isDaemonRunning ? _stopDaemon : _startDaemon,
-          ),
-          onTap: _isDaemonRunning ? _stopDaemon : _startDaemon,
+          trailing: _isDaemonLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : IconButton(
+                  icon: Icon(_isDaemonRunning ? Icons.stop : Icons.play_arrow, size: 20),
+                  color: _isDaemonRunning ? Colors.redAccent : Colors.green,
+                  onPressed: _isDaemonRunning ? _stopDaemon : _startDaemon,
+                ),
+          onTap: _isDaemonLoading ? null : (_isDaemonRunning ? _stopDaemon : _startDaemon),
         ),
         const Spacer(),
         Padding(
