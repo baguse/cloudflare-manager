@@ -154,6 +154,16 @@ class _WebhookScreenState extends State<WebhookScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                if (webhook.botToken != null)
+                  Text(
+                    'Bot: ${webhook.botToken!.length > 20 ? '${webhook.botToken!.substring(0, 20)}...' : webhook.botToken}',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                if (webhook.channelId != null)
+                  Text(
+                    'Chat: ${webhook.channelId}',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
                 Text(
                   '${webhook.triggers.length} trigger(s)',
                   style: const TextStyle(fontSize: 11, color: Colors.grey),
@@ -251,6 +261,8 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
   late TextEditingController _urlController;
   late TextEditingController _bodyTemplateController;
   late TextEditingController _webhookUrlController;
+  late TextEditingController _botTokenController;
+  late TextEditingController _chatIdController;
   
   late WebhookType _selectedType;
   late HttpMethod _selectedMethod;
@@ -267,6 +279,8 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
     _urlController = TextEditingController(text: webhook?.url ?? '');
     _bodyTemplateController = TextEditingController(text: webhook?.bodyTemplate ?? '');
     _webhookUrlController = TextEditingController(text: webhook?.webhookUrl ?? '');
+    _botTokenController = TextEditingController(text: webhook?.botToken ?? '');
+    _chatIdController = TextEditingController(text: webhook?.channelId ?? '');
     _selectedType = webhook?.type ?? WebhookType.http;
     _selectedMethod = webhook?.method ?? HttpMethod.post;
     _selectedTriggers = webhook?.triggers.toSet() ?? {};
@@ -279,6 +293,8 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
     _urlController.dispose();
     _bodyTemplateController.dispose();
     _webhookUrlController.dispose();
+    _botTokenController.dispose();
+    _chatIdController.dispose();
     super.dispose();
   }
 
@@ -302,6 +318,8 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
       headers: _headers.isNotEmpty ? _headers : null,
       bodyTemplate: _bodyTemplateController.text.trim().isEmpty ? null : _bodyTemplateController.text.trim(),
       webhookUrl: _webhookUrlController.text.trim().isEmpty ? null : _webhookUrlController.text.trim(),
+      botToken: _botTokenController.text.trim().isEmpty ? null : _botTokenController.text.trim(),
+      channelId: _chatIdController.text.trim().isEmpty ? null : _chatIdController.text.trim(),
     );
 
     if (widget.webhook != null) {
@@ -328,6 +346,8 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
       headers: _headers.isNotEmpty ? _headers : null,
       bodyTemplate: _bodyTemplateController.text.trim().isEmpty ? null : _bodyTemplateController.text.trim(),
       webhookUrl: _webhookUrlController.text.trim().isEmpty ? null : _webhookUrlController.text.trim(),
+      botToken: _botTokenController.text.trim().isEmpty ? null : _botTokenController.text.trim(),
+      channelId: _chatIdController.text.trim().isEmpty ? null : _chatIdController.text.trim(),
     );
 
     final success = await WebhookService.instance.testWebhook(webhook);
@@ -399,19 +419,41 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
               onChanged: (v) => setState(() => _selectedType = v!),
             ),
             const SizedBox(height: 16),
-            if (_selectedType == WebhookType.discord || _selectedType == WebhookType.slack || _selectedType == WebhookType.telegram) ...[
+            if (_selectedType == WebhookType.discord || _selectedType == WebhookType.slack) ...[
               TextFormField(
                 controller: _webhookUrlController,
-                decoration: InputDecoration(
-                  labelText: '${_selectedType.name[0].toUpperCase()}${_selectedType.name.substring(1)} Webhook URL',
-                  border: const OutlineInputBorder(),
-                  hintText: 'https://hooks.slack.com/... or https://discord.com/api/webhooks/...',
+                decoration: const InputDecoration(
+                  labelText: 'Webhook URL',
+                  border: OutlineInputBorder(),
+                  hintText: 'https://discord.com/api/webhooks/... or https://hooks.slack.com/...',
                 ),
                 validator: (v) {
                   if (v?.trim().isEmpty == true) return 'Required';
                   if (!v!.startsWith('http')) return 'Must start with http:// or https://';
                   return null;
                 },
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_selectedType == WebhookType.telegram) ...[
+              TextFormField(
+                controller: _botTokenController,
+                decoration: const InputDecoration(
+                  labelText: 'Bot Token',
+                  border: OutlineInputBorder(),
+                  hintText: '123456:ABC-DEF1234ghikl-zyx57W2v1u123ew11',
+                ),
+                validator: (v) => v?.trim().isEmpty == true ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _chatIdController,
+                decoration: const InputDecoration(
+                  labelText: 'Chat ID',
+                  border: OutlineInputBorder(),
+                  hintText: '@channelname or -1001234567890',
+                ),
+                validator: (v) => v?.trim().isEmpty == true ? 'Required' : null,
               ),
               const SizedBox(height: 16),
             ],

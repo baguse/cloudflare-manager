@@ -227,16 +227,7 @@ class WebhookService {
           await _executeDiscordWebhook(webhook, event, trigger, logId, startTime);
           break;
         case WebhookType.telegram:
-          _debugLog('${webhook.type.name} not yet implemented');
-          await _addLog(WebhookLog(
-            id: logId,
-            webhookId: webhook.id,
-            webhookName: webhook.name,
-            trigger: trigger,
-            status: WebhookLogStatus.failed,
-            error: '${webhook.type.name} not yet implemented',
-            durationMs: DateTime.now().difference(startTime).inMilliseconds,
-          ));
+          await _executeTelegramWebhook(webhook, event, trigger, logId, startTime);
           break;
       }
     } catch (e) {
@@ -435,6 +426,115 @@ class WebhookService {
     }
   }
 
+  Future<void> _executeTelegramWebhook(
+    WebhookConfig webhook,
+    DaemonEvent event,
+    WebhookTrigger trigger,
+    String logId,
+    DateTime startTime,
+  ) async {
+    final botToken = webhook.botToken;
+    final chatId = webhook.channelId;
+    if (botToken == null || botToken.isEmpty || chatId == null || chatId.isEmpty) {
+      _debugLog('Telegram webhook missing bot token or chat ID');
+      await _addLog(WebhookLog(
+        id: logId,
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        trigger: trigger,
+        status: WebhookLogStatus.failed,
+        error: 'Missing bot token or chat ID',
+      ));
+      return;
+    }
+
+    final text = _telegramText(event);
+
+    final body = json.encode({
+      'chat_id': chatId,
+      'text': text,
+      'parse_mode': 'HTML',
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.telegram.org/bot$botToken/sendMessage'),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 10));
+
+      final duration = DateTime.now().difference(startTime).inMilliseconds;
+      final result = json.decode(response.body) as Map<String, dynamic>;
+      final success = result['ok'] == true;
+
+      await _addLog(WebhookLog(
+        id: logId,
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        trigger: trigger,
+        status: success ? WebhookLogStatus.success : WebhookLogStatus.failed,
+        statusCode: response.statusCode,
+        response: response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body,
+        durationMs: duration,
+      ));
+    } catch (e) {
+      final duration = DateTime.now().difference(startTime).inMilliseconds;
+      await _addLog(WebhookLog(
+        id: logId,
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        trigger: trigger,
+        status: WebhookLogStatus.failed,
+        error: e.toString(),
+        durationMs: duration,
+      ));
+    }
+  }
+
+  String _telegramText(DaemonEvent event) {
+    final buf = StringBuffer();
+    final emoji = _telegramEmoji(event.type);
+    buf.writeln('$emoji <b>${_discordTitle(event)}</b>');
+    buf.writeln();
+    buf.writeln(_discordDescription(event));
+    if (event.tunnelId != null && event.tunnelId!.isNotEmpty) {
+      buf.writeln('<b>Tunnel ID:</b> <code>${event.tunnelId}</code>');
+    }
+    if (event.hostname != null && event.hostname!.isNotEmpty) {
+      buf.writeln('<b>Hostname:</b> ${event.hostname}');
+    }
+    if (event.port != null) {
+      buf.writeln('<b>Port:</b> ${event.port}');
+    }
+    if (event.reason != null && event.reason!.isNotEmpty) {
+      buf.writeln('<b>Reason:</b> ${event.reason}');
+    }
+    if (event.error != null && event.error!.isNotEmpty) {
+      buf.writeln('<b>Error:</b> <code>${event.error}</code>');
+    }
+    buf.writeln();
+    buf.writeln('<i>${event.timestamp.toIso8601String()}</i>');
+    return buf.toString();
+  }
+
+  String _telegramEmoji(DaemonEventType type) {
+    switch (type) {
+      case DaemonEventType.tunnelStarted:
+      case DaemonEventType.tunnelCreated:
+      case DaemonEventType.daemonStarted:
+        return '\u2705'; // ✅
+      case DaemonEventType.tunnelStopped:
+      case DaemonEventType.tunnelDeleted:
+        return '\u274C'; // ❌
+      case DaemonEventType.tunnelCrashed:
+        return '\u26A0\uFE0F'; // ⚠️
+      case DaemonEventType.tunnelReconnected:
+        return '\u267B'; // ♻️
+      case DaemonEventType.daemonStopping:
+        return '\u23F9\uFE0F'; // ⏹️
+    }
+  }
+
   String _discordTitle(DaemonEvent event) {
     switch (event.type) {
       case DaemonEventType.tunnelStarted: return 'Tunnel Started';
@@ -503,8 +603,8 @@ class WebhookService {
           await _executeDiscordWebhook(webhook, testEvent, WebhookTrigger.tunnelStarted, logId, startTime);
           return true;
         case WebhookType.telegram:
-          _debugLog('Test not available for ${webhook.type.name}');
-          return false;
+          await _executeTelegramWebhook(webhook, testEvent, WebhookTrigger.tunnelStarted, logId, startTime);
+          return true;
       }
     } catch (e) {
       _debugLog('Test failed: $e');
