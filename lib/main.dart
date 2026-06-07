@@ -11,6 +11,8 @@ import 'port_scanner.dart';
 import 'settings_screen.dart';
 import 'dns_editor_screen.dart';
 import 'webhook_screen.dart';
+import 'webhook_service.dart';
+import 'daemon/events.dart';
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
@@ -495,6 +497,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     setState(() {});
   }
 
+  void _fireWebhook(DaemonEventType type, {String? tunnelId, String? hostname, int? port}) {
+    WebhookService.instance.loadWebhooks().catchError((_) {});
+    WebhookService.instance.triggerWebhooks(DaemonEvent(
+      type: type,
+      tunnelId: tunnelId,
+      hostname: hostname,
+      port: port,
+    )).catchError((e) => print('[webhook] $e'));
+  }
+
   Future<void> _ensureDaemon() async {
     if (_isDaemonRunning) return;
     _showToast('Starting daemon service...', isInfo: true);
@@ -527,6 +539,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       final tunnelId = tunnelData['id'];
       final tunnelToken = tunnelData['token'];
+
+      _fireWebhook(DaemonEventType.tunnelCreated, tunnelId: tunnelId, hostname: fullDomain, port: port);
 
       _showToast('Configuring routing...', isInfo: true);
       final configured = await CloudflareService.configureTunnel(tunnelId, fullDomain, port);
@@ -833,6 +847,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     final success = await CloudflareService.deleteTunnel(id);
     if (success) {
       _showToast('Tunnel and DNS record deleted.');
+      _fireWebhook(DaemonEventType.tunnelDeleted, tunnelId: id);
     } else {
       _showToast('Local tunnel stopped, but Cloudflare delete failed.', isError: true);
     }

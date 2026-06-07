@@ -202,6 +202,10 @@ class WebhookService {
         return WebhookTrigger.tunnelCrashed;
       case DaemonEventType.tunnelReconnected:
         return WebhookTrigger.tunnelReconnected;
+      case DaemonEventType.tunnelCreated:
+        return WebhookTrigger.tunnelCreated;
+      case DaemonEventType.tunnelDeleted:
+        return WebhookTrigger.tunnelDeleted;
       case DaemonEventType.daemonStarted:
         return WebhookTrigger.daemonStarted;
       case DaemonEventType.daemonStopping:

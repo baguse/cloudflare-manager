@@ -353,6 +353,10 @@ class _WebhookLogsScreenState extends State<WebhookLogsScreen> {
         return 'Tunnel Crashed';
       case WebhookTrigger.tunnelReconnected:
         return 'Tunnel Reconnected';
+      case WebhookTrigger.tunnelCreated:
+        return 'Tunnel Created';
+      case WebhookTrigger.tunnelDeleted:
+        return 'Tunnel Deleted';
       case WebhookTrigger.daemonStarted:
         return 'Daemon Started';
       case WebhookTrigger.daemonStopping:

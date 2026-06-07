@@ -5,6 +5,8 @@ enum DaemonEventType {
   tunnelStopped,
   tunnelCrashed,
   tunnelReconnected,
+  tunnelCreated,
+  tunnelDeleted,
   daemonStarted,
   daemonStopping,
 }
@@ -38,6 +40,10 @@ class DaemonEvent {
         return 'tunnel.crashed';
       case DaemonEventType.tunnelReconnected:
         return 'tunnel.reconnected';
+      case DaemonEventType.tunnelCreated:
+        return 'tunnel.created';
+      case DaemonEventType.tunnelDeleted:
+        return 'tunnel.deleted';
       case DaemonEventType.daemonStarted:
         return 'daemon.started';
       case DaemonEventType.daemonStopping:

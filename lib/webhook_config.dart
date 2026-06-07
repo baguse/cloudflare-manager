@@ -20,6 +20,8 @@ enum WebhookTrigger {
   tunnelStopped,
   tunnelCrashed,
   tunnelReconnected,
+  tunnelCreated,
+  tunnelDeleted,
   daemonStarted,
   daemonStopping,
 }

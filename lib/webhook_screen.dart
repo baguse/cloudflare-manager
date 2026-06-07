@@ -435,6 +435,20 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
             const SizedBox(height: 24),
             const Text('Triggers', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
+            CheckboxListTile(
+              title: const Text('All events', style: TextStyle(fontWeight: FontWeight.bold)),
+              value: _selectedTriggers.length == WebhookTrigger.values.length,
+              onChanged: (checked) {
+                setState(() {
+                  if (checked == true) {
+                    _selectedTriggers = WebhookTrigger.values.toSet();
+                  } else {
+                    _selectedTriggers.clear();
+                  }
+                });
+              },
+            ),
+            const Divider(),
             ...WebhookTrigger.values.map((trigger) {
               return CheckboxListTile(
                 title: Text(_formatTriggerName(trigger)),
@@ -466,6 +480,10 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
         return 'Tunnel Crashed';
       case WebhookTrigger.tunnelReconnected:
         return 'Tunnel Reconnected';
+      case WebhookTrigger.tunnelCreated:
+        return 'Tunnel Created';
+      case WebhookTrigger.tunnelDeleted:
+        return 'Tunnel Deleted';
       case WebhookTrigger.daemonStarted:
         return 'Daemon Started';
       case WebhookTrigger.daemonStopping:
