@@ -2577,83 +2577,90 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Icon(icon, color: iconColor, size: 28),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            children: [
+              Icon(icon, color: iconColor, size: 28),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (health != null) ...[
+                          const SizedBox(width: 8),
+                          _buildHealthDot(health),
+                          const SizedBox(width: 6),
+                          LatencySparkline(
+                            samples: _getHealthHistory(copyUrl),
+                          ),
+                        ] else if (_isCheckingHealth) ...[
+                          const SizedBox(width: 8),
+                          const SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.grey),
+                          ),
+                        ],
+                        if (watcherStatus != null) ...[
+                          const SizedBox(width: 8),
+                          _buildWatcherChip(watcherStatus),
+                        ],
+                      ],
                     ),
-                    if (health != null) ...[
-                      const SizedBox(width: 8),
-                      _buildHealthDot(health),
-                      const SizedBox(width: 6),
-                      LatencySparkline(
-                        samples: _getHealthHistory(copyUrl),
-                      ),
-                    ] else if (_isCheckingHealth) ...[
-                      const SizedBox(width: 8),
-                      const SizedBox(
-                        width: 10,
-                        height: 10,
-                        child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.grey),
-                      ),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
+                    if (tags != null && tags.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _buildTagChips(tags),
                     ],
-                    if (watcherStatus != null) ...[
-                      const SizedBox(width: 8),
-                      _buildWatcherChip(watcherStatus),
+                    if (notes != null && notes.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(Icons.notes, size: 12, color: Colors.orangeAccent),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              notes,
+                              style: const TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(subtitle, style: TextStyle(fontSize: 12, color: subtitleColor)),
-                if (tags != null && tags.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  _buildTagChips(tags),
-                ],
-                if (notes != null && notes.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Icon(Icons.notes, size: 12, color: Colors.orangeAccent),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          notes,
-                          style: const TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
+              ),
+            ],
           ),
-          if (tunnelId != null)
-            IconButton(
-              icon: Icon(Icons.edit_note, size: 20, color: (notes != null && notes.isNotEmpty) ? const Color(0xFFF6821F) : Colors.grey),
-              tooltip: 'Edit notes & tags',
-              onPressed: () => _showNotesDialog(tunnelId),
-            ),
-          if (tunnelId != null)
-            IconButton(
-              icon: Icon(Icons.shield, size: 20, color: _tunnelConfigs[tunnelId]?['serviceEnabled'] == 'true' ? Colors.green : Colors.grey),
-              tooltip: 'Service mode',
-              onPressed: () => _showServiceDialog(tunnelId),
-            ),
-          if (isLocal && tunnel != null) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+            if (tunnelId != null)
+              IconButton(
+                icon: Icon(Icons.edit_note, size: 20, color: (notes != null && notes.isNotEmpty) ? const Color(0xFFF6821F) : Colors.grey),
+                tooltip: 'Edit notes & tags',
+                onPressed: () => _showNotesDialog(tunnelId),
+              ),
+            if (tunnelId != null)
+              IconButton(
+                icon: Icon(Icons.shield, size: 20, color: _tunnelConfigs[tunnelId]?['serviceEnabled'] == 'true' ? Colors.green : Colors.grey),
+                tooltip: 'Service mode',
+                onPressed: () => _showServiceDialog(tunnelId),
+              ),
+            if (isLocal && tunnel != null) ...[
             IconButton(
               icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
               tooltip: 'Copy URL',
@@ -2759,6 +2766,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               onPressed: () => _deleteRemoteTunnel(tunnelId),
             ),
           ]
+            ],
+          ),
         ],
       ),
     );

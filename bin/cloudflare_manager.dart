@@ -5,12 +5,14 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:cloudflare_manager/daemon/daemon.dart';
 import 'package:cloudflare_manager/daemon/ipc_client.dart';
+import 'package:cloudflare_manager/daemon/http_api.dart';
 
 void main(List<String> arguments) async {
   final parser = ArgParser()
     ..addCommand('daemon')
     ..addCommand('tunnel')
-    ..addCommand('service');
+    ..addCommand('service')
+    ..addCommand('api');
 
   final daemonParser = ArgParser();
   daemonParser.addCommand('start');
@@ -25,6 +27,12 @@ void main(List<String> arguments) async {
   serviceParser.addCommand('install');
   serviceParser.addCommand('uninstall');
   serviceParser.addCommand('status');
+
+  final apiParser = ArgParser();
+  apiParser.addCommand('start');
+  apiParser.addCommand('stop');
+  apiParser.addOption('port', abbr: 'p', defaultsTo: '9845');
+  apiParser.addOption('key', abbr: 'k', defaultsTo: '');
 
   if (arguments.isEmpty) {
     _printUsage(parser);
@@ -42,6 +50,9 @@ void main(List<String> arguments) async {
       break;
     case 'service':
       await _handleService(arguments.sublist(1));
+      break;
+    case 'api':
+      await _handleApi(arguments.sublist(1));
       break;
     case '--help':
     case '-h':
@@ -62,6 +73,7 @@ Usage:
   cloudflare-manager daemon <subcommand>    Manage the daemon
   cloudflare-manager tunnel <subcommand>    Manage tunnels
   cloudflare-manager service <subcommand>   Manage system service
+  cloudflare-manager api <subcommand>       Manage HTTP API server
 
 Daemon subcommands:
   daemon start     Start the daemon (foreground)
@@ -371,4 +383,82 @@ Future<void> _serviceStatus() async {
     final running = result.stdout.toString().contains('com.cloudflare.manager.daemon');
     print('Service: ${running ? "loaded" : "not loaded"}');
   }
+}
+
+Future<void> _handleApi(List<String> args) async {
+  if (args.isEmpty) {
+    print('Usage: cloudflare-manager api <start|stop> [--port <port>] [--key <key>]');
+    return;
+  }
+
+  final sub = args.first;
+  final parser = ArgParser();
+  parser.addOption('port', abbr: 'p', defaultsTo: '9845');
+  parser.addOption('key', abbr: 'k', defaultsTo: '');
+  final parsed = parser.parse(args.sublist(1));
+
+  switch (sub) {
+    case 'start':
+      await _apiStart(
+        int.tryParse(parsed['port'] as String) ?? 9845,
+        parsed['key'] as String?,
+      );
+      break;
+    case 'stop':
+      await _apiStop();
+      break;
+    default:
+      print('Unknown api subcommand: $sub');
+  }
+}
+
+String _getApiKey() {
+  final home = Platform.environment['HOME'] ?? '/tmp';
+  final keyFile = File('$home/.cloudflared/api-key');
+  if (keyFile.existsSync()) {
+    return keyFile.readAsStringSync().trim();
+  }
+  final key = _generateKey();
+  keyFile.parent.createSync(recursive: true);
+  keyFile.writeAsStringSync(key);
+  return key;
+}
+
+String _generateKey() {
+  final random = List.generate(32, (_) {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    return chars[DateTime.now().microsecondsSinceEpoch % chars.length];
+  }).join();
+  return 'cm_${random}_' + DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+}
+
+HttpApiServer? _apiServer;
+
+Future<void> _apiStart(int port, String? providedKey) async {
+  if (_apiServer != null) {
+    print('API server is already running.');
+    return;
+  }
+
+  final key = (providedKey != null && providedKey.isNotEmpty) ? providedKey : _getApiKey();
+  print('[api] Starting API server on port $port...');
+
+  _apiServer = HttpApiServer(port: port, apiKey: key);
+  await _apiServer!.start();
+}
+
+Future<void> _apiStop() async {
+  if (_apiServer == null) {
+    final client = DaemonClient();
+    if (await client.connect()) {
+      await client.shutdown();
+      client.disconnect();
+      print('Sent stop signal to API server.');
+      return;
+    }
+    print('API server is not running.');
+    return;
+  }
+  await _apiServer!.stop();
+  _apiServer = null;
 }

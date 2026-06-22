@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'cloudflare_service.dart';
+import 'daemon/cf_api_client.dart';
 import 'tray_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -58,6 +59,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isLoading = true);
     await _storage.write(key: CloudflareService.tokenKey, value: _tokenController.text.trim());
     await _storage.write(key: CloudflareService.accountIdKey, value: _accountIdController.text.trim());
+    await CfApiClient.setToken(_tokenController.text.trim());
+    await CfApiClient.setAccountId(_accountIdController.text.trim());
     await _savePortRange();
 
     final error = await CloudflareService.verifyToken();
