@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -223,7 +224,7 @@ class CloudflareService {
       final headers = await _getHeaders();
       
       // Generate a 32-byte secret (Base64 encoded)
-      final secretBytes = List<int>.generate(32, (i) => i); // Simplistic static secret for demo purposes, in production use cryptographically secure random
+      final secretBytes = List<int>.generate(32, (_) => Random.secure().nextInt(256));
       final tunnelSecret = base64Encode(secretBytes);
       
       final response = await http.post(
