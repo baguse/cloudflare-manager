@@ -438,8 +438,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     for (final entry in appMap.entries) {
       final tunnelId = entry.key;
       final port = entry.value.port;
-      final token = entry.value.token;
-      if (token == null) continue;
+
+      if (!await CloudflaredService.credentialsFileExists(tunnelId)) continue;
 
       final serviceEnabled = await CloudflaredService.readServiceEnabled(tunnelId);
       if (serviceEnabled) continue;
@@ -468,7 +468,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         tunnelId: tunnelId,
         port: port,
         hostname: hostname,
-        token: token,
         currentPid: pid,
       );
     }
@@ -737,8 +736,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       return;
     }
     final token = await CloudflaredService.readAppTunnelToken(tunnelId);
-    if (token == null) {
-      _showToast('No stored token for this tunnel. Create it from the app first.', isError: true);
+    final hasCreds = await CloudflaredService.credentialsFileExists(tunnelId);
+    if (token == null && !hasCreds) {
+      _showToast('No stored credentials for this tunnel. Create it from the app first.', isError: true);
       return;
     }
     final cfg = _tunnelConfigs[tunnelId];
@@ -764,26 +764,32 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
 
-      _showToast('Starting via daemon...', isInfo: true);
-      await _ensureDaemon();
+      int? startPid;
+      if (token != null) {
+        _showToast('Starting via daemon...', isInfo: true);
+        await _ensureDaemon();
 
-      final client = DaemonClient();
-      if (!await client.connect()) throw Exception('Daemon not reachable');
-      final bindResult = await client.bindTunnel(tunnelId, token, hostname, port);
-      client.disconnect();
+        final client = DaemonClient();
+        if (!await client.connect()) throw Exception('Daemon not reachable');
+        final bindResult = await client.bindTunnel(tunnelId, token, hostname, port);
+        client.disconnect();
 
-      if (bindResult['ok'] != true) {
-        throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
+        if (bindResult['ok'] != true) {
+          throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
+        }
+        startPid = bindResult['pid'] as int?;
+      } else {
+        _showToast('Starting cloudflared...', isInfo: true);
+        final process = await CloudflaredService.startTunnelById(tunnelId);
+        if (process == null) throw Exception('No credentials file found');
+        startPid = process.pid;
       }
-
-      final daemonPid = bindResult['pid'] as int?;
 
       _watcher.watch(
         tunnelId: tunnelId,
         port: port,
         hostname: hostname,
-        token: token,
-        currentPid: daemonPid,
+        currentPid: startPid,
       );
 
       final activeTunnel = ActiveTunnel(
@@ -791,7 +797,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         name: 'tunnel-$hostname',
         localPort: port,
         url: 'https://$hostname',
-        pid: daemonPid,
+        pid: startPid,
         logs: ValueNotifier<List<String>>([]),
       );
 

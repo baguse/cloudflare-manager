@@ -248,6 +248,9 @@ class CloudflaredService {
   }
 
   static Future<void> registerAppTunnel(String tunnelId, int localPort, {String? token, String? hostname}) async {
+    if (token != null) {
+      await writeCredentialsFile(token);
+    }
     final file = _appTunnelMapFile();
     if (file == null) return;
     try {
@@ -255,13 +258,11 @@ class CloudflaredService {
       final data = json.decode(content);
       final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
       final existing = map[tunnelId];
-      final String? existingToken = existing is Map ? existing['token'] as String? : null;
       final String? existingNotes = existing is Map ? existing['notes'] as String? : null;
       final String? existingTags = existing is Map ? existing['tags'] as String? : null;
       final String? existingHostname = existing is Map ? existing['hostname'] as String? : null;
       map[tunnelId] = {
         'port': localPort,
-        if (token != null) 'token': token else if (existingToken != null) 'token': existingToken,
         if (hostname != null) 'hostname': hostname else if (existingHostname != null) 'hostname': existingHostname,
         if (existingNotes != null) 'notes': existingNotes,
         if (existingTags != null) 'tags': existingTags,
@@ -535,6 +536,24 @@ class CloudflaredService {
       'run',
       '--token',
       token,
+    ]);
+  }
+
+  static Future<bool> credentialsFileExists(String tunnelId) async {
+    final path = _credentialsFilePath(tunnelId);
+    if (path == null) return false;
+    return await File(path).exists();
+  }
+
+  static Future<Process?> startTunnelById(String tunnelId) async {
+    final path = _credentialsFilePath(tunnelId);
+    if (path == null) return null;
+    if (!await File(path).exists()) return null;
+    return await Process.start(_executablePath, [
+      'tunnel',
+      '--no-autoupdate',
+      'run',
+      tunnelId,
     ]);
   }
 

@@ -119,14 +119,6 @@ class TunnelWatcher {
   }
 
   Future<void> _check(WatchedTunnel t) async {
-    if (t.token == null) {
-      if (t.status != TunnelWatcherStatus.lostNoToken) {
-        t.status = TunnelWatcherStatus.lostNoToken;
-        _events.add(WatcherEvent(tunnelId: t.tunnelId, status: t.status));
-      }
-      return;
-    }
-
     final alive = await _isAlive(t.currentPid);
     if (alive) {
       if (t.status == TunnelWatcherStatus.reconnecting || t.retryCount > 0) {
@@ -143,11 +135,28 @@ class TunnelWatcher {
 
     if (!_shouldRespawnNow(t)) return;
 
+    if (t.token == null) {
+      final credsExist = await CloudflaredService.credentialsFileExists(t.tunnelId);
+      if (!credsExist) {
+        if (t.status != TunnelWatcherStatus.lostNoToken) {
+          t.status = TunnelWatcherStatus.lostNoToken;
+          _events.add(WatcherEvent(tunnelId: t.tunnelId, status: t.status));
+        }
+        return;
+      }
+    }
+
     t.status = TunnelWatcherStatus.reconnecting;
     _events.add(WatcherEvent(tunnelId: t.tunnelId, status: t.status));
 
     try {
-      final process = await CloudflaredService.startTokenTunnel(t.token!);
+      final Process? process;
+      if (t.token != null) {
+        process = await CloudflaredService.startTokenTunnel(t.token!);
+      } else {
+        process = await CloudflaredService.startTunnelById(t.tunnelId);
+      }
+      if (process == null) throw Exception('startTunnelById returned null');
       t.currentPid = process.pid;
       t.retryCount = 0;
       t.nextBackoff = _minBackoff;
