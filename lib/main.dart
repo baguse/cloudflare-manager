@@ -448,12 +448,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       final hostname = cfg?['hostname'];
       if (hostname == null || hostname.isEmpty) {
         await CloudflaredService.unregisterAppTunnel(tunnelId);
+        await CloudflaredService.deleteCredentialsFile(tunnelId);
         continue;
       }
 
       final existsRemotely = _remoteTunnels.any((t) => t['id'] == tunnelId);
       if (!existsRemotely) {
         await CloudflaredService.unregisterAppTunnel(tunnelId);
+        await CloudflaredService.deleteCredentialsFile(tunnelId);
         continue;
       }
 
@@ -851,6 +853,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
     await CloudflaredService.saveServiceEnabled(id, false);
     await CloudflaredService.unregisterAppTunnel(id);
+    await CloudflaredService.deleteCredentialsFile(id);
     _watcher.unwatch(id);
     await CloudflareService.deleteTunnelDnsRecords(id);
     final success = await CloudflareService.deleteTunnel(id);
@@ -870,6 +873,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     )) return;
     _showToast('Deleting remote tunnel...', isInfo: true);
     await CloudflareService.deleteTunnelDnsRecords(tunnelId);
+    await CloudflaredService.deleteCredentialsFile(tunnelId);
+    await CloudflaredService.unregisterAppTunnel(tunnelId);
     final success = await CloudflareService.deleteTunnel(tunnelId);
     if (success) {
       _showToast('Tunnel and DNS record deleted.');

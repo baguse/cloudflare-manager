@@ -91,7 +91,33 @@ class CloudflaredService {
               final id = tokenData['t'];
               if (id is String) tunnelId = id;
             } catch (e) {
-              // Token might not be valid base64/JSON, skip
+            }
+          }
+        }
+
+        if (tunnelId == null) {
+          final runMatch = RegExp(r'\brun\s+([0-9a-fA-F\-]{36})').firstMatch(command);
+          if (runMatch != null) {
+            tunnelId = runMatch.group(1);
+          }
+        }
+
+        if (tunnelId == null) {
+          final credsIndex = command.indexOf('--credentials-file');
+          if (credsIndex != -1) {
+            final after = command.substring(credsIndex + '--credentials-file'.length).trimLeft();
+            final end = after.indexOf(RegExp(r'\s'));
+            final path = end == -1 ? after : after.substring(0, end);
+            if (path.isNotEmpty) {
+              try {
+                final file = File(path);
+                if (await file.exists()) {
+                  final data = json.decode(await file.readAsString());
+                  final id = data['TunnelID'];
+                  if (id is String) tunnelId = id;
+                }
+              } catch (e) {
+              }
             }
           }
         }
@@ -445,13 +471,70 @@ class CloudflaredService {
     ]);
   }
 
+  static String? _credentialsDirPath() {
+    final home = Platform.environment['HOME'];
+    if (home == null) return null;
+    return '$home/.cloudflared';
+  }
+
+  static String? _credentialsFilePath(String tunnelId) {
+    final dir = _credentialsDirPath();
+    if (dir == null) return null;
+    return '$dir/$tunnelId.json';
+  }
+
+  static Future<String?> writeCredentialsFile(String token) async {
+    try {
+      final decoded = json.decode(utf8.decode(base64Decode(token)));
+      final tunnelId = decoded['t'] as String?;
+      final accountId = decoded['a'] as String?;
+      final secret = decoded['s'] as String?;
+      if (tunnelId == null || accountId == null || secret == null) return null;
+      final path = _credentialsFilePath(tunnelId);
+      if (path == null) return null;
+      final file = File(path);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(json.encode({
+        'AccountTag': accountId,
+        'TunnelSecret': secret,
+        'TunnelID': tunnelId,
+      }));
+      try {
+        await Process.run('chmod', ['600', file.path]);
+      } catch (_) {}
+      return tunnelId;
+    } catch (e) {
+      print('Error writing credentials file: $e');
+      return null;
+    }
+  }
+
+  static Future<void> deleteCredentialsFile(String tunnelId) async {
+    final path = _credentialsFilePath(tunnelId);
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+    }
+  }
+
   static Future<Process> startTokenTunnel(String token) async {
+    final tunnelId = await writeCredentialsFile(token);
+    if (tunnelId != null && tunnelId.isNotEmpty) {
+      return await Process.start(_executablePath, [
+        'tunnel',
+        '--no-autoupdate',
+        'run',
+        tunnelId,
+      ]);
+    }
     return await Process.start(_executablePath, [
       'tunnel',
       '--no-autoupdate',
       'run',
       '--token',
-      token
+      token,
     ]);
   }
 
@@ -465,28 +548,49 @@ class CloudflaredService {
         if (!line.contains('cloudflared')) continue;
         if (line.contains('grep')) continue;
 
-        final tokenIndex = line.indexOf('--token');
-        if (tokenIndex == -1) continue;
+        final parts = line.trim().split(RegExp(r'\s+'));
+        final pid = parts.length >= 2 ? int.tryParse(parts[1]) : null;
+        if (pid == null) continue;
 
-        final afterToken = line.substring(tokenIndex + '--token'.length).trimLeft();
-        final tokenEnd = afterToken.indexOf(RegExp(r'\s'));
-        final token = tokenEnd == -1 ? afterToken : afterToken.substring(0, tokenEnd);
+        final command = parts.sublist(10).join(' ');
+        bool match = false;
 
-        try {
-          final decoded = utf8.decode(base64Decode(token));
-          final tokenData = json.decode(decoded);
-          if (tokenData['t'] == tunnelId) {
-            final parts = line.trim().split(RegExp(r'\s+'));
-            if (parts.length >= 2) {
-              final pid = int.tryParse(parts[1]);
-              if (pid != null) {
-                Process.killPid(pid);
-                return true;
+        final tokenIndex = command.indexOf('--token');
+        if (tokenIndex != -1) {
+          final afterToken = command.substring(tokenIndex + '--token'.length).trimLeft();
+          final tokenEnd = afterToken.indexOf(RegExp(r'\s'));
+          final token = tokenEnd == -1 ? afterToken : afterToken.substring(0, tokenEnd);
+          try {
+            final decoded = utf8.decode(base64Decode(token));
+            final tokenData = json.decode(decoded);
+            if (tokenData['t'] == tunnelId) match = true;
+          } catch (e) {}
+        }
+
+        if (!match) {
+          final runMatch = RegExp(r'\brun\s+([0-9a-fA-F\-]{36})').firstMatch(command);
+          if (runMatch != null && runMatch.group(1) == tunnelId) match = true;
+        }
+
+        if (!match) {
+          final credsIndex = command.indexOf('--credentials-file');
+          if (credsIndex != -1) {
+            final after = command.substring(credsIndex + '--credentials-file'.length).trimLeft();
+            final end = after.indexOf(RegExp(r'\s'));
+            final path = end == -1 ? after : after.substring(0, end);
+            try {
+              final file = File(path);
+              if (await file.exists()) {
+                final data = json.decode(await file.readAsString());
+                if (data['TunnelID'] == tunnelId) match = true;
               }
-            }
+            } catch (e) {}
           }
-        } catch (e) {
-          // skip
+        }
+
+        if (match) {
+          Process.killPid(pid);
+          return true;
         }
       }
     } catch (e) {

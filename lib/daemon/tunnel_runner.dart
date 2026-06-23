@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'events.dart';
+import '../cloudflared_service.dart';
 
 enum TunnelRunState { idle, starting, running, crashed, stopped }
 
@@ -42,9 +43,11 @@ class TunnelRunner {
 
     try {
       final cloudflared = await _findCloudflared();
-      _process = await Process.start(cloudflared, [
-        'tunnel', '--no-autoupdate', 'run', '--token', token,
-      ]);
+      final tunnelId = await CloudflaredService.writeCredentialsFile(token);
+      final args = tunnelId != null && tunnelId.isNotEmpty
+          ? ['tunnel', '--no-autoupdate', 'run', tunnelId]
+          : ['tunnel', '--no-autoupdate', 'run', '--token', token];
+      _process = await Process.start(cloudflared, args);
 
       _state = TunnelRunState.running;
       _startedAt = DateTime.now();
