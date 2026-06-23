@@ -23,14 +23,14 @@ class PortScanner {
       if (os == 'linux') {
         final ssResult = await Process.run('ss', ['-tulnp']);
         if (ssResult.exitCode == 0) {
-           return _parseSsOutput(ssResult.stdout as String);
-        }
-      }
+           return _parseSsOutput(ssResult.stdout.toString());
+         }
+       }
 
-      if (os == 'linux' || os == 'macos') {
-        final result = await Process.run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']);
-        if (result.exitCode == 0) {
-          return _parseLsofOutput(result.stdout as String);
+       if (os == 'linux' || os == 'macos') {
+         final result = await Process.run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']);
+         if (result.exitCode == 0) {
+           return _parseLsofOutput(result.stdout.toString());
         }
       }
     } catch (e) {
