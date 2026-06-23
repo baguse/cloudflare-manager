@@ -954,18 +954,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   void _showToast(String message, {bool isError = false, bool isInfo = false}) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
+    messenger.removeCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.redAccent : (isInfo ? Colors.blueGrey : Colors.green),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 3),
-        action: SnackBarAction(
-          label: '✕',
-          textColor: Colors.white70,
-          onPressed: () => messenger.hideCurrentSnackBar(),
-        ),
+        duration: isError ? const Duration(seconds: 5) : const Duration(seconds: 3),
       ),
     );
   }
