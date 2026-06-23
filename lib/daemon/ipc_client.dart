@@ -82,7 +82,7 @@ class DaemonClient {
       send('tunnel_stop', args: {'tunnelId': tunnelId});
   Future<Map<String, dynamic>> shutdown() => send('shutdown');
   Future<Map<String, dynamic>> reloadWebhooks() => send('reload_webhooks');
-  Future<Map<String, dynamic>> bindTunnel(String tunnelId, String token, String hostname, int port) =>
+  Future<Map<String, dynamic>> bindTunnel(String tunnelId, String? token, String hostname, int port) =>
       send('tunnel_bind', args: {'tunnelId': tunnelId, 'token': token, 'hostname': hostname, 'port': port});
   Future<Map<String, dynamic>> unbindTunnel(String tunnelId) =>
       send('tunnel_unbind', args: {'tunnelId': tunnelId});

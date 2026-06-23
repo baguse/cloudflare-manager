@@ -119,6 +119,13 @@ class CloudflareDaemon {
       0,
     );
 
+    try {
+      final s = await sockFile.stat();
+      if ((s.mode & 0xFFF) != 384) {
+        await Process.run('chmod', ['600', socketPath]);
+      }
+    } catch (_) {}
+
     _ipcServer!.listen((client) {
       _ipcClients.add(client);
       client.listen(
@@ -166,8 +173,8 @@ class CloudflareDaemon {
           final token = msg['token'] as String?;
           final hostname = msg['hostname'] as String? ?? '';
           final port = msg['port'] as int?;
-          if (id == null || token == null || port == null) {
-            _sendIpc(client, {'ok': false, 'error': 'Missing tunnelId, token, or port'});
+          if (id == null || port == null) {
+            _sendIpc(client, {'ok': false, 'error': 'Missing tunnelId or port'});
             break;
           }
           if (_runners.containsKey(id)) {

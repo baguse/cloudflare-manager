@@ -9,7 +9,7 @@ enum TunnelRunState { idle, starting, running, crashed, stopped }
 
 class TunnelRunner {
   final String tunnelId;
-  final String token;
+  final String? token;
   final String hostname;
   final int port;
   final void Function(DaemonEvent event) onEvent;
@@ -25,7 +25,7 @@ class TunnelRunner {
 
   TunnelRunner({
     required this.tunnelId,
-    required this.token,
+    this.token,
     required this.hostname,
     required this.port,
     required this.onEvent,
@@ -43,10 +43,10 @@ class TunnelRunner {
 
     try {
       final cloudflared = await _findCloudflared();
-      final tunnelId = await CloudflaredService.writeCredentialsFile(token);
-      final args = tunnelId != null && tunnelId.isNotEmpty
-          ? ['tunnel', '--no-autoupdate', 'run', tunnelId]
-          : ['tunnel', '--no-autoupdate', 'run', '--token', token];
+      if (token != null) {
+        await CloudflaredService.writeCredentialsFile(token!);
+      }
+      final args = ['tunnel', '--no-autoupdate', 'run', tunnelId];
       _process = await Process.start(cloudflared, args);
 
       _state = TunnelRunState.running;
