@@ -846,7 +846,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       setState(() => _activeTunnels.remove(tunnel));
     } else if (pid != null) {
       try {
-        Process.killPid(pid);
+        await CloudflaredService.forceKillPid(pid);
         _runningTunnels.removeWhere((t) => t.pid == pid);
         if (tunnelId != null) {
           try { await _daemonClient.unbindTunnel(tunnelId); } catch (_) {}
@@ -2475,7 +2475,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             tooltip: 'Kill process',
             onPressed: () async {
               try {
-                Process.killPid(t.pid);
+                await CloudflaredService.forceKillPid(t.pid);
                 _runningTunnels.removeWhere((r) => r.pid == t.pid);
                 _showToast('Killed cloudflared (pid ${t.pid})', isInfo: true);
                 _fetchRemoteTunnels();
@@ -2735,7 +2735,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               tooltip: 'Kill external cloudflared process',
               onPressed: () async {
                 try {
-                  Process.killPid(pid);
+                  await CloudflaredService.forceKillPid(pid);
                   if (tunnelId != null) {
                     _tunnelLocalProcess.remove(tunnelId);
                     _daemonClient.unbindTunnel(tunnelId).catchError((_) => <String, dynamic>{});

@@ -557,6 +557,19 @@ class CloudflaredService {
     ]);
   }
 
+  static Future<void> forceKillPid(int pid) async {
+    try {
+      Process.killPid(pid);
+      await Future.delayed(const Duration(seconds: 2));
+      try {
+        final check = await Process.run('kill', ['-0', '$pid']);
+        if (check.exitCode == 0) {
+          Process.killPid(pid, ProcessSignal.sigkill);
+        }
+      } catch (_) {}
+    } catch (_) {}
+  }
+
   static Future<bool> killTunnelById(String tunnelId) async {
     try {
       final result = await Process.run('ps', ['aux']);
@@ -608,7 +621,7 @@ class CloudflaredService {
         }
 
         if (match) {
-          Process.killPid(pid);
+          await forceKillPid(pid);
           return true;
         }
       }
