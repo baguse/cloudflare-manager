@@ -236,7 +236,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     _refreshTimer?.cancel();
     _connectivityTimer?.cancel();
     _watcherSub?.cancel();
-    _watcher.stop();
+    _watcher.dispose();
     _inspectorSub?.cancel();
     _inspector?.stop();
     _portsSearchController.dispose();

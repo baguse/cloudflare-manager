@@ -74,6 +74,11 @@ class TunnelWatcher {
     _timer = null;
   }
 
+  void dispose() {
+    stop();
+    _events.close();
+  }
+
   void watch({
     required String tunnelId,
     required int port,
