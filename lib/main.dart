@@ -914,6 +914,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   void _offerBind(int port, OpenPort? openPort) {
+    if (!mounted) return;
     if (_tunnelLabelForPort(port) != null) return;
     if (!_isPortAllowed(port)) return;
     if (_offeredPorts.contains(port)) return;
@@ -957,6 +958,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   void _showToast(String message, {bool isError = false, bool isInfo = false}) {
+    if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
       SnackBar(
