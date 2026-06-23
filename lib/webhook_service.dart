@@ -217,33 +217,43 @@ class WebhookService {
 
   Future<void> _executeWebhook(WebhookConfig webhook, DaemonEvent event, WebhookTrigger trigger) async {
     final startTime = DateTime.now();
-    String logId = const Uuid().v4();
+    final logId = const Uuid().v4();
+    final maxRetries = webhook.maxRetries;
     
-    try {
-      switch (webhook.type) {
-        case WebhookType.http:
-          await _executeHttpWebhook(webhook, event, trigger, logId, startTime);
-          break;
-        case WebhookType.slack:
-          await _executeSlackWebhook(webhook, event, trigger, logId, startTime);
-          break;
-        case WebhookType.discord:
-          await _executeDiscordWebhook(webhook, event, trigger, logId, startTime);
-          break;
-        case WebhookType.telegram:
-          await _executeTelegramWebhook(webhook, event, trigger, logId, startTime);
-          break;
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      final attemptStart = DateTime.now();
+      try {
+        switch (webhook.type) {
+          case WebhookType.http:
+            await _executeHttpWebhook(webhook, event, trigger, logId, startTime);
+            break;
+          case WebhookType.slack:
+            await _executeSlackWebhook(webhook, event, trigger, logId, startTime);
+            break;
+          case WebhookType.discord:
+            await _executeDiscordWebhook(webhook, event, trigger, logId, startTime);
+            break;
+          case WebhookType.telegram:
+            await _executeTelegramWebhook(webhook, event, trigger, logId, startTime);
+            break;
+        }
+        return;
+      } catch (e) {
+        if (attempt < maxRetries) {
+          _debugLog('[retry ${attempt + 1}/$maxRetries] ${webhook.name}: $e');
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
+        }
+        await _addLog(WebhookLog(
+          id: logId,
+          webhookId: webhook.id,
+          webhookName: webhook.name,
+          trigger: trigger,
+          status: WebhookLogStatus.failed,
+          error: '$e (after $maxRetries retries)',
+          durationMs: DateTime.now().difference(startTime).inMilliseconds,
+        ));
       }
-    } catch (e) {
-      await _addLog(WebhookLog(
-        id: logId,
-        webhookId: webhook.id,
-        webhookName: webhook.name,
-        trigger: trigger,
-        status: WebhookLogStatus.failed,
-        error: e.toString(),
-        durationMs: DateTime.now().difference(startTime).inMilliseconds,
-      ));
     }
   }
 

@@ -33,6 +33,7 @@ class WebhookConfig {
   final bool enabled;
   final WebhookType type;
   final Set<WebhookTrigger> triggers;
+  final int maxRetries;
   
   // HTTP webhook specific
   final String? url;
@@ -51,6 +52,7 @@ class WebhookConfig {
     this.enabled = true,
     required this.type,
     Set<WebhookTrigger>? triggers,
+    this.maxRetries = 3,
     this.url,
     this.method,
     this.headers,
@@ -66,6 +68,7 @@ class WebhookConfig {
     'enabled': enabled,
     'type': type.name,
     'triggers': triggers.map((t) => t.name).toList(),
+    'maxRetries': maxRetries,
     if (url != null) 'url': url,
     if (method != null) 'method': method!.name,
     if (headers != null) 'headers': headers,
@@ -90,6 +93,7 @@ class WebhookConfig {
                 orElse: () => WebhookTrigger.tunnelStarted,
               ))
           .toSet() ?? {},
+      maxRetries: json['maxRetries'] as int? ?? 3,
       url: json['url'] as String?,
       method: json['method'] != null
           ? HttpMethod.values.firstWhere(
@@ -113,6 +117,7 @@ class WebhookConfig {
     bool? enabled,
     WebhookType? type,
     Set<WebhookTrigger>? triggers,
+    int? maxRetries,
     String? url,
     HttpMethod? method,
     Map<String, String>? headers,
@@ -127,6 +132,7 @@ class WebhookConfig {
       enabled: enabled ?? this.enabled,
       type: type ?? this.type,
       triggers: triggers ?? this.triggers,
+      maxRetries: maxRetries ?? this.maxRetries,
       url: url ?? this.url,
       method: method ?? this.method,
       headers: headers ?? this.headers,

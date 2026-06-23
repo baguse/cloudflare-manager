@@ -267,6 +267,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
   late WebhookType _selectedType;
   late HttpMethod _selectedMethod;
   late Set<WebhookTrigger> _selectedTriggers;
+  int _maxRetries = 3;
   Map<String, String> _headers = {};
   bool _saving = false;
   bool _testing = false;
@@ -284,6 +285,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
     _selectedType = webhook?.type ?? WebhookType.http;
     _selectedMethod = webhook?.method ?? HttpMethod.post;
     _selectedTriggers = webhook?.triggers.toSet() ?? {};
+    _maxRetries = webhook?.maxRetries ?? 3;
     _headers = Map.from(webhook?.headers ?? {});
   }
 
@@ -313,6 +315,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
       enabled: widget.webhook?.enabled ?? true,
       type: _selectedType,
       triggers: _selectedTriggers,
+      maxRetries: _maxRetries,
       url: _urlController.text.trim(),
       method: _selectedMethod,
       headers: _headers.isNotEmpty ? _headers : null,
@@ -341,6 +344,7 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
       id: 'test',
       name: _nameController.text.trim(),
       type: _selectedType,
+      maxRetries: 0,
       url: _urlController.text.trim(),
       method: _selectedMethod,
       headers: _headers.isNotEmpty ? _headers : null,
@@ -501,6 +505,31 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
                 style: TextStyle(fontSize: 11, color: Colors.grey),
               ),
             ],
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Text('Max Retries: ', style: TextStyle(color: Colors.white70)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Slider(
+                    value: _maxRetries.toDouble(),
+                    min: 0,
+                    max: 10,
+                    divisions: 10,
+                    label: '$_maxRetries',
+                    onChanged: (v) => setState(() => _maxRetries = v.round()),
+                  ),
+                ),
+                SizedBox(
+                  width: 40,
+                  child: Text(
+                    '$_maxRetries',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             const Text('Triggers', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
