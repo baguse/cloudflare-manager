@@ -581,14 +581,39 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Future<void> _stopTunnel(ActiveTunnel tunnel) async {
-    tunnel.process?.kill();
-    if (tunnel.tunnelId != null) {
-      _watcher.unwatch(tunnel.tunnelId!);
-      _tunnelLocalProcess.remove(tunnel.tunnelId);
-      _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
-      _daemonClient.unbindTunnel(tunnel.tunnelId!).catchError((_) => <String, dynamic>{});
+    final id = tunnel.tunnelId;
+
+    bool killed = false;
+    if (id != null) {
+      try {
+        final result = await _daemonClient.unbindTunnel(id);
+        killed = result['ok'] == true;
+      } catch (_) {}
+    }
+    if (!killed) {
+      if (tunnel.pid != null) {
+        final running = _runningTunnels.where((t) => t.tunnelId == id).toList();
+        final livePid = running.isNotEmpty ? running.first.pid : tunnel.pid!;
+        await CloudflaredService.forceKillPid(livePid);
+      } else if (tunnel.process != null) {
+        tunnel.process!.kill();
+      }
+    }
+
+    if (id != null) {
+      _watcher.unwatch(id);
+      _tunnelLocalProcess.remove(id);
+      _runningTunnels.removeWhere((t) => t.tunnelId == id);
     }
     setState(() => _activeTunnels.remove(tunnel));
+    if (id != null && !killed) {
+      final cfg = _tunnelConfigs[id];
+      _fireWebhook(DaemonEventType.tunnelStopped,
+        tunnelId: id,
+        hostname: cfg?['hostname'],
+        port: tunnel.localPort,
+      );
+    }
     _showToast('Tunnel stopped', isInfo: true);
   }
 
@@ -760,6 +785,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         final process = await CloudflaredService.startTunnelById(tunnelId);
         if (process == null) throw Exception('No credentials file found');
         startPid = process.pid;
+        _fireWebhook(DaemonEventType.tunnelStarted, tunnelId: tunnelId, hostname: hostname, port: port);
       }
 
       _watcher.watch(
@@ -2451,6 +2477,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             onPressed: () async {
               try {
                 await CloudflaredService.forceKillPid(t.pid);
+                if (t.tunnelId != null) {
+                  _watcher.unwatch(t.tunnelId!);
+                  final cfg = _tunnelConfigs[t.tunnelId];
+                  _fireWebhook(DaemonEventType.tunnelStopped,
+                    tunnelId: t.tunnelId,
+                    hostname: cfg?['hostname'],
+                    port: _pidToTunnelPort[t.pid],
+                  );
+                }
                 _runningTunnels.removeWhere((r) => r.pid == t.pid);
                 _showToast('Killed cloudflared (pid ${t.pid})', isInfo: true);
                 _fetchRemoteTunnels();
@@ -2712,8 +2747,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 try {
                   await CloudflaredService.forceKillPid(pid);
                   if (tunnelId != null) {
+                    _watcher.unwatch(tunnelId!);
                     _tunnelLocalProcess.remove(tunnelId);
                     _daemonClient.unbindTunnel(tunnelId).catchError((_) => <String, dynamic>{});
+                    final cfg = _tunnelConfigs[tunnelId];
+                    _fireWebhook(DaemonEventType.tunnelStopped,
+                      tunnelId: tunnelId,
+                      hostname: cfg?['hostname'],
+                      port: _pidToTunnelPort[pid],
+                    );
                   }
                   _runningTunnels.removeWhere((r) => r.pid == pid);
                   _showToast('Killed cloudflared (pid $pid)', isInfo: true);
