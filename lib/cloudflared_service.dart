@@ -261,11 +261,13 @@ class CloudflaredService {
       final String? existingNotes = existing is Map ? existing['notes'] as String? : null;
       final String? existingTags = existing is Map ? existing['tags'] as String? : null;
       final String? existingHostname = existing is Map ? existing['hostname'] as String? : null;
+      final existingServiceEnabled = existing is Map ? existing['serviceEnabled'] : null;
       map[tunnelId] = {
         'port': localPort,
         if (hostname != null) 'hostname': hostname else if (existingHostname != null) 'hostname': existingHostname,
         if (existingNotes != null) 'notes': existingNotes,
         if (existingTags != null) 'tags': existingTags,
+        if (existingServiceEnabled != null) 'serviceEnabled': existingServiceEnabled,
       };
       await file.parent.create(recursive: true);
       await file.writeAsString(json.encode(map));
