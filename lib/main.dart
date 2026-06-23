@@ -482,12 +482,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       );
       if (tunnel != null) {
         tunnel.replaceProcess(newProcess);
-        newProcess.stdout.transform(utf8.decoder).listen((data) {
-          tunnel.logs.value = [...tunnel.logs.value, data];
-        });
-        newProcess.stderr.transform(utf8.decoder).listen((data) {
-          tunnel.logs.value = [...tunnel.logs.value, data];
-        });
       }
     }
     if (event.status == TunnelWatcherStatus.reconnecting) {
@@ -3379,6 +3373,8 @@ class ActiveTunnel {
   Process? process;
   int? pid;
   final ValueNotifier<List<String>> logs;
+  StreamSubscription? _logSub1;
+  StreamSubscription? _logSub2;
 
   ActiveTunnel({
     this.tunnelId,
@@ -3391,8 +3387,18 @@ class ActiveTunnel {
   });
 
   void replaceProcess(Process? newProcess) {
+    _logSub1?.cancel();
+    _logSub2?.cancel();
     process = newProcess;
-    if (newProcess != null) pid = newProcess.pid;
+    if (newProcess != null) {
+      pid = newProcess.pid;
+      _logSub1 = newProcess.stdout.transform(utf8.decoder).listen((data) {
+        logs.value = [...logs.value, data];
+      });
+      _logSub2 = newProcess.stderr.transform(utf8.decoder).listen((data) {
+        logs.value = [...logs.value, data];
+      });
+    }
   }
 }
 
