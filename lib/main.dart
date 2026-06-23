@@ -211,24 +211,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Future<void> _performServiceToggle(String tunnelId, bool enabled) async {
-    final token = await CloudflaredService.readAppTunnelToken(tunnelId);
-    if (token == null) {
-      _showToast('No token stored. Create tunnel from the app first.', isError: true);
-      return;
-    }
     await CloudflaredService.saveServiceEnabled(tunnelId, enabled);
-    String? error;
-    if (enabled) {
-      error = await TunnelServiceManager.instance.installService();
-    } else {
-      error = await TunnelServiceManager.instance.stopDaemon();
-    }
-    if (error != null) {
-      _showToast('Error: $error', isError: true);
-      return;
-    }
     if (mounted) setState(() {});
-    _showToast(enabled ? 'Service installed' : 'Service stopped', isInfo: true);
+    _showToast(enabled ? 'Tunnel will auto-start on boot' : 'Auto-start disabled', isInfo: true);
   }
 
   @override
@@ -2658,7 +2643,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             if (tunnelId != null)
               IconButton(
                 icon: Icon(Icons.shield, size: 20, color: _tunnelConfigs[tunnelId]?['serviceEnabled'] == 'true' ? Colors.green : Colors.grey),
-                tooltip: 'Service mode',
+                tooltip: 'Auto-start on boot',
                 onPressed: () => _showServiceDialog(tunnelId),
               ),
             if (isLocal && tunnel != null) ...[
@@ -3165,8 +3150,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   void _showServiceDialog(String tunnelId) async {
-    final installed = await TunnelServiceManager.instance.isServiceInstalled();
-    final running = await TunnelServiceManager.instance.isDaemonRunning();
     final cfg = _tunnelConfigs[tunnelId] ?? {};
     final hostname = cfg['hostname'] ?? '';
 
@@ -3191,7 +3174,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                       children: [
                         const Icon(Icons.shield, color: Color(0xFFF6821F), size: 20),
                         const SizedBox(width: 10),
-                        const Text('Service Mode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const Text('Auto-start', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         const Spacer(),
                         IconButton(
                           icon: const Icon(Icons.close, size: 18),
@@ -3202,27 +3185,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                     const SizedBox(height: 8),
                     Text(hostname, style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Icon(
-                          running ? Icons.check_circle : (installed ? Icons.pause_circle : Icons.cancel),
-                          color: running ? Colors.green : (installed ? Colors.orange : Colors.grey),
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          running ? 'Service running' : (installed ? 'Service installed (stopped)' : 'Not registered'),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: running ? Colors.green : (installed ? Colors.orange : Colors.grey),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
                     SwitchListTile(
-                      title: const Text('Run as system service', style: TextStyle(fontSize: 14)),
-                      subtitle: const Text('Survives app exit & reboots', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      title: const Text('Auto-start on boot', style: TextStyle(fontSize: 14)),
+                      subtitle: const Text('Daemon will start this tunnel when the system boots', style: TextStyle(fontSize: 11, color: Colors.grey)),
                       value: serviceEnabled,
                       activeThumbColor: const Color(0xFFF6821F),
                       onChanged: (v) {
@@ -3234,9 +3199,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                       },
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      TunnelServiceManager.instance.privilegeNote(),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    const Text(
+                      'Requires the background daemon to be installed (see Settings). Without it, this flag has no effect.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                   ],
                 ),
