@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:convert';
+import 'dart:io';
 import 'cloudflare_service.dart';
 import 'daemon/cf_api_client.dart';
 import 'tray_service.dart';
@@ -18,9 +20,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _accountIdController = TextEditingController();
   final _minPortController = TextEditingController();
   final _maxPortController = TextEditingController();
+  final _bootDelayController = TextEditingController();
+  final _maxRetriesController = TextEditingController();
   bool _isLoading = false;
   int? _autoBindMinPort;
   int? _autoBindMaxPort;
+  int _bootDelaySeconds = 3;
+  int _maxStartRetries = 10;
   bool _closeToTray = false;
   bool _autoStart = false;
 
@@ -52,7 +58,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _closeToTray = closeToTray == 'true';
     _autoStart = autoStart == 'true';
 
+    await _loadDaemonConfig();
+
     setState(() => _isLoading = false);
+  }
+
+  Future<void> _loadDaemonConfig() async {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final file = File('$home/.cloudflared/daemon.json');
+    if (!await file.exists()) return;
+    try {
+      final data = json.decode(await file.readAsString());
+      if (data is Map) {
+        if (data['bootDelaySeconds'] is int) {
+          _bootDelaySeconds = data['bootDelaySeconds'] as int;
+        }
+        if (data['maxStartRetries'] is int) {
+          _maxStartRetries = data['maxStartRetries'] as int;
+        }
+      }
+    } catch (_) {}
+    _bootDelayController.text = '$_bootDelaySeconds';
+    _maxRetriesController.text = '$_maxStartRetries';
+  }
+
+  Future<void> _saveDaemonConfig() async {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final dir = Directory('$home/.cloudflared');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final file = File('${dir.path}/daemon.json');
+    await file.writeAsString(json.encode({
+      'bootDelaySeconds': int.tryParse(_bootDelayController.text.trim()) ?? _bootDelaySeconds,
+      'maxStartRetries': int.tryParse(_maxRetriesController.text.trim()) ?? _maxStartRetries,
+    }));
   }
 
   Future<void> _saveSettings() async {
@@ -62,6 +100,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await CfApiClient.setToken(_tokenController.text.trim());
     await CfApiClient.setAccountId(_accountIdController.text.trim());
     await _savePortRange();
+    await _saveDaemonConfig();
 
     final error = await CloudflareService.verifyToken();
 
@@ -118,6 +157,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _accountIdController.dispose();
     _minPortController.dispose();
     _maxPortController.dispose();
+    _bootDelayController.dispose();
+    _maxRetriesController.dispose();
     super.dispose();
   }
 
@@ -220,6 +261,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         await TrayService.instance.setCloseToTray(true);
                       }
                     },
+                  ),
+                  const SizedBox(height: 32),
+                  const Text('Daemon Boot Settings',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Configure how the background daemon handles tunnel starts on system boot.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _bootDelayController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Boot delay (seconds)',
+                            border: OutlineInputBorder(),
+                            helperText: 'Wait before starting tunnels',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: _maxRetriesController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Max start retries',
+                            border: OutlineInputBorder(),
+                            helperText: 'Retries per tunnel on boot',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 32),
                   SizedBox(

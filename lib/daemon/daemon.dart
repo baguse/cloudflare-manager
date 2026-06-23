@@ -5,6 +5,7 @@ import 'dart:io';
 import 'events.dart';
 import 'tunnel_runner.dart';
 import '../webhook_service.dart';
+import '../cloudflared_service.dart';
 
 class CloudflareDaemon {
   final String configPath;
@@ -33,18 +34,67 @@ class CloudflareDaemon {
     return '$home/.cloudflared/$_socketName';
   }
 
+  String get _daemonConfigPath {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    return '$home/.cloudflared/daemon.json';
+  }
+
+  int get maxStartRetries => _maxStartRetries;
+  int _maxStartRetries = 10;
+  int get bootDelaySeconds => _bootDelaySeconds;
+  int _bootDelaySeconds = 3;
+
+  Future<void> _loadDaemonConfig() async {
+    final file = File(_daemonConfigPath);
+    if (!await file.exists()) return;
+    try {
+      final data = json.decode(await file.readAsString());
+      if (data is Map) {
+        if (data['maxStartRetries'] is int) {
+          _maxStartRetries = data['maxStartRetries'] as int;
+        }
+        if (data['bootDelaySeconds'] is int) {
+          _bootDelaySeconds = data['bootDelaySeconds'] as int;
+        }
+      }
+    } catch (e) {
+      print('[daemon] Error reading daemon config: $e');
+    }
+  }
+
+  Future<void> saveDaemonConfig({int? maxStartRetries, int? bootDelaySeconds}) async {
+    final file = File(_daemonConfigPath);
+    var data = <String, dynamic>{};
+    try {
+      if (await file.exists()) {
+        data = json.decode(await file.readAsString()) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    if (maxStartRetries != null) {
+      data['maxStartRetries'] = maxStartRetries;
+      _maxStartRetries = maxStartRetries;
+    }
+    if (bootDelaySeconds != null) {
+      data['bootDelaySeconds'] = bootDelaySeconds;
+      _bootDelaySeconds = bootDelaySeconds;
+    }
+    await file.parent.create(recursive: true);
+    await file.writeAsString(json.encode(data));
+  }
+
   Future<void> start() async {
     if (_running) return;
     _running = true;
 
     await WebhookService.instance.loadWebhooks();
+    await _loadDaemonConfig();
     _emit(DaemonEvent(type: DaemonEventType.daemonStarted));
 
     await _loadTunnels();
     await _startIpcServer();
 
-    print('[daemon] Started, managing ${_runners.length} tunnel(s)');
-    print('[daemon] IPC socket: $socketPath');
+    print('[daemon] Started, managing ${_runners.length} tunnel(s), max retries=$_maxStartRetries');
+    print('[daemon] IPC socket: $socketPath]');
   }
 
   Future<void> stop() async {
@@ -87,6 +137,11 @@ class CloudflareDaemon {
     final data = json.decode(await file.readAsString());
     if (data is! Map) return;
 
+    if (_bootDelaySeconds > 0) {
+      print('[daemon] Waiting ${_bootDelaySeconds}s for network...');
+      await Future.delayed(Duration(seconds: _bootDelaySeconds));
+    }
+
     for (final entry in data.entries) {
       final tunnelId = entry.key;
       final cfg = entry.value;
@@ -95,14 +150,19 @@ class CloudflareDaemon {
 
       final token = cfg['token'] as String?;
       final port = cfg['port'] as int?;
-      if (token == null || port == null) continue;
+      final hostname = cfg['hostname'] as String? ?? '';
+      if (port == null) continue;
+
+      final hasCreds = await CloudflaredService.credentialsFileExists(tunnelId);
+      if (token == null && !hasCreds) continue;
 
       final runner = TunnelRunner(
         tunnelId: tunnelId,
         token: token,
-        hostname: cfg['hostname'] as String? ?? '',
+        hostname: hostname,
         port: port,
         onEvent: _emit,
+        maxRestarts: _maxStartRetries,
       );
       _runners[tunnelId] = runner;
       await runner.start();
@@ -186,6 +246,7 @@ class CloudflareDaemon {
             hostname: hostname,
             port: port,
             onEvent: _emit,
+            maxRestarts: _maxStartRetries,
           );
           _runners[id] = runner;
           await runner.start();

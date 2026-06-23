@@ -13,13 +13,13 @@ class TunnelRunner {
   final String hostname;
   final int port;
   final void Function(DaemonEvent event) onEvent;
+  final int maxRestarts;
 
   Process? _process;
   TunnelRunState _state = TunnelRunState.idle;
   final List<String> _logs = [];
   Timer? _healthTimer;
   int _restartCount = 0;
-  static const _maxRestarts = 10;
   static const _baseDelay = Duration(seconds: 2);
   DateTime? _startedAt;
 
@@ -29,6 +29,7 @@ class TunnelRunner {
     required this.hostname,
     required this.port,
     required this.onEvent,
+    this.maxRestarts = 10,
   });
 
   TunnelRunState get state => _state;
@@ -118,13 +119,13 @@ class TunnelRunner {
   }
 
   void _scheduleRestart() {
-    if (_restartCount >= _maxRestarts) {
-      _addLog('Max restarts ($_maxRestarts) reached, giving up.');
+    if (_restartCount >= maxRestarts) {
+      _addLog('Max restarts ($maxRestarts) reached, giving up.');
       return;
     }
     final delay = _baseDelay * (1 << _restartCount.clamp(0, 5));
     _restartCount++;
-    _addLog('Restarting in ${delay.inSeconds}s (attempt $_restartCount/$_maxRestarts)...');
+    _addLog('Restarting in ${delay.inSeconds}s (attempt $_restartCount/$maxRestarts)...');
     Timer(delay, () {
       if (_state == TunnelRunState.crashed) {
         onEvent(DaemonEvent(
