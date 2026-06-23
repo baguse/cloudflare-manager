@@ -237,6 +237,7 @@ class WebhookService {
             await _executeTelegramWebhook(webhook, event, trigger, logId, startTime);
             break;
         }
+        _debugLog('[${webhook.name}] → OK (${event.eventName})');
         return;
       } catch (e) {
         if (attempt < maxRetries) {
