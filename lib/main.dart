@@ -108,6 +108,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   int? _autoBindMinPort;
   int? _autoBindMaxPort;
   bool _isDaemonRunning = false;
+  bool _isDaemonInstalled = false;
   bool _isDaemonLoading = false;
   final DaemonClient _daemonClient = DaemonClient();
   final _secureStorage = const FlutterSecureStorage();
@@ -166,33 +167,55 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
   Future<void> _checkDaemonStatus() async {
     final running = await _daemonClient.isDaemonRunning;
-    if (mounted) setState(() => _isDaemonRunning = running);
+    final installed = await TunnelServiceManager.instance.isServiceInstalled();
+    print('[app] _checkDaemonStatus: running=$running installed=$installed socketPath=${_daemonClient.socketPath}');
+    if (mounted) {
+      setState(() {
+        _isDaemonRunning = running;
+        _isDaemonInstalled = installed;
+      });
+    }
   }
 
   Future<void> _startDaemon() async {
     if (_isDaemonLoading) return;
+    if (!_isCloudflaredInstalled) {
+      _showToast('cloudflared is not installed!', isError: true);
+      return;
+    }
     setState(() => _isDaemonLoading = true);
     
+    print('[app] _startDaemon: starting via service manager...');
     final installed = await TunnelServiceManager.instance.isServiceInstalled();
     if (!installed) {
       final error = await TunnelServiceManager.instance.installService();
       if (error != null) {
+        print('[app] _startDaemon: install failed: $error');
         _showToast('Failed to install service: $error', isError: true);
         await _checkDaemonStatus();
         setState(() => _isDaemonLoading = false);
         return;
       }
+      print('[app] _startDaemon: install succeeded');
       _showToast('Service installed and started', isInfo: true);
     } else {
       final error = await TunnelServiceManager.instance.startDaemon();
       if (error != null) {
+        print('[app] _startDaemon: startDaemon error: $error');
         _showToast('Failed to start daemon: $error', isError: true);
       } else {
+        print('[app] _startDaemon: startDaemon ok');
         _showToast('Daemon started', isInfo: true);
       }
     }
-    await Future.delayed(const Duration(seconds: 2));
-    await _checkDaemonStatus();
+    print('[app] _startDaemon: waiting for daemon socket...');
+    for (var i = 0; i < 10; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+      await _checkDaemonStatus();
+      print('[app] _startDaemon: check $i _isDaemonRunning=$_isDaemonRunning');
+      if (_isDaemonRunning) break;
+    }
+    print('[app] _startDaemon: done, _isDaemonRunning=$_isDaemonRunning');
     setState(() => _isDaemonLoading = false);
   }
 
@@ -494,17 +517,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     });
   }
 
-  Future<void> _ensureDaemon() async {
-    if (_isDaemonRunning) return;
-    _showToast('Starting daemon service...', isInfo: true);
-    await _startDaemon();
-    await Future.delayed(const Duration(seconds: 2));
-    await _checkDaemonStatus();
-  }
-
   Future<void> _startTunnel(int port) async {
     if (!_isCloudflaredInstalled) {
       _showToast('cloudflared is not installed!', isError: true);
+      return;
+    }
+    if (!_isDaemonRunning) {
+      _showToast('Daemon is not running. Start it from the sidebar.', isError: true);
       return;
     }
 
@@ -540,7 +559,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken, hostname: fullDomain);
 
       _showToast('Starting via daemon...', isInfo: true);
-      await _ensureDaemon();
 
       final client = DaemonClient();
       if (!await client.connect()) throw Exception('Daemon not reachable');
@@ -768,8 +786,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       int? startPid;
       if (token != null) {
+        if (!_isDaemonRunning) {
+          _showToast('Daemon is not running. Start it from the sidebar.', isError: true);
+          return;
+        }
         _showToast('Starting via daemon...', isInfo: true);
-        await _ensureDaemon();
 
         final client = DaemonClient();
         if (!await client.connect()) throw Exception('Daemon not reachable');
@@ -937,6 +958,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 style: const TextStyle(fontSize: 13),
               ),
             ),
+            if (_isDaemonRunning)
             TextButton(
               onPressed: () => _startTunnel(port),
               style: TextButton.styleFrom(
@@ -1074,10 +1096,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 )
               : IconButton(
                   icon: Icon(_isDaemonRunning ? Icons.stop : Icons.play_arrow, size: 20),
-                  color: _isDaemonRunning ? Colors.redAccent : Colors.green,
-                  onPressed: _isDaemonRunning ? _stopDaemon : _startDaemon,
+                  color: _isDaemonRunning ? Colors.redAccent : (_isCloudflaredInstalled ? Colors.green : Colors.grey),
+                  onPressed: _isDaemonRunning
+                      ? _stopDaemon
+                      : (_isCloudflaredInstalled ? _startDaemon : null),
                 ),
-          onTap: _isDaemonLoading ? null : (_isDaemonRunning ? _stopDaemon : _startDaemon),
+          onTap: _isDaemonLoading
+              ? null
+              : _isDaemonRunning
+                  ? _stopDaemon
+                  : (_isCloudflaredInstalled ? _startDaemon : null),
         ),
         const Spacer(),
         Padding(
@@ -1090,12 +1118,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 size: 20,
               ),
               const SizedBox(width: 8),
-              Text(_isCloudflaredInstalled ? 'Daemon Ready' : 'Daemon Missing', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text(_statusLabel, style: const TextStyle(fontSize: 12, color: Colors.grey)),
             ],
           ),
         ),
       ],
     );
+  }
+
+  String get _statusLabel {
+    if (!_isCloudflaredInstalled) return 'cloudflared missing';
+    if (!_isDaemonInstalled) return 'Daemon not installed';
+    if (!_isDaemonRunning) return 'Daemon stopped';
+    return 'Daemon Ready';
   }
 
   Widget _buildNarrowSidebar() {
@@ -1431,7 +1466,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               ),
               const SizedBox(width: 4),
               ElevatedButton(
-                onPressed: isTunneled ? null : () => _startTunnel(portInfo.port),
+                onPressed: (isTunneled || !_isDaemonRunning) ? null : () => _startTunnel(portInfo.port),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFF6821F),
                   foregroundColor: Colors.white,
@@ -1439,7 +1474,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   disabledForegroundColor: Colors.grey,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
-                child: Text(isTunneled ? 'Linked' : 'Bind'),
+                child: Text(isTunneled ? 'Linked' : (!_isDaemonRunning ? 'No Daemon' : 'Bind')),
               ),
             ],
           ),
@@ -3229,16 +3264,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                     const SizedBox(height: 16),
                     SwitchListTile(
                       title: const Text('Auto-start on boot', style: TextStyle(fontSize: 14)),
-                      subtitle: const Text('Daemon will start this tunnel when the system boots', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      subtitle: Text(
+                        _isDaemonInstalled ? 'Daemon will start this tunnel when the system boots' : 'Daemon not installed — install it from Settings first',
+                        style: TextStyle(fontSize: 11, color: _isDaemonInstalled ? Colors.grey : Colors.redAccent),
+                      ),
                       value: serviceEnabled,
                       activeThumbColor: const Color(0xFFF6821F),
-                      onChanged: (v) {
+                      onChanged: _isDaemonInstalled ? (v) {
                         _tunnelConfigs[tunnelId] ??= {};
                         _tunnelConfigs[tunnelId]!['serviceEnabled'] = v.toString();
                         setDialogState(() {});
                         if (mounted) setState(() {});
                         _performServiceToggle(tunnelId, v);
-                      },
+                      } : null,
                     ),
                     const SizedBox(height: 8),
                     const Text(

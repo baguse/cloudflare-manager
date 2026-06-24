@@ -90,8 +90,8 @@ class CloudflareDaemon {
     await _loadDaemonConfig();
     _emit(DaemonEvent(type: DaemonEventType.daemonStarted));
 
-    await _loadTunnels();
     await _startIpcServer();
+    await _loadTunnels();
 
     print('[daemon] Started, managing ${_runners.length} tunnel(s), max retries=$_maxStartRetries');
     print('[daemon] IPC socket: $socketPath]');

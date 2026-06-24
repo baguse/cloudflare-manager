@@ -23,26 +23,44 @@ class CloudflaredService {
   static String _executablePath = 'cloudflared';
 
   static Future<bool> isInstalled() async {
+    final List<String> searchPaths = [];
+
+    try {
+      final which = await Process.run('which', ['cloudflared']);
+      if (which.exitCode == 0 && (which.stdout as String).trim().isNotEmpty) {
+        searchPaths.add((which.stdout as String).trim());
+      }
+    } catch (_) {}
+
     final home = Platform.environment['HOME'] ?? '';
-    final commonPaths = [
+    searchPaths.addAll([
       'cloudflared',
       '/usr/local/bin/cloudflared',
       '/opt/homebrew/bin/cloudflared',
       '/usr/bin/cloudflared',
       if (home.isNotEmpty) '$home/.cloudflared/cloudflared',
-    ];
+    ]);
 
-    for (final path in commonPaths) {
+    final seen = <String>{};
+    for (final path in searchPaths) {
+      if (seen.contains(path)) continue;
+      seen.add(path);
       try {
         final result = await Process.run(path, ['--version']);
         if (result.exitCode == 0) {
           _executablePath = path;
           return true;
         }
-      } catch (e) {
-        // Continue checking other paths
+      } catch (_) {}
+    }
+
+    for (final path in seen) {
+      if (File(path).existsSync()) {
+        _executablePath = path;
+        return true;
       }
     }
+
     return false;
   }
 
