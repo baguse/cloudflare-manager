@@ -261,15 +261,31 @@ class TunnelServiceManager {
       if (Platform.isMacOS) {
         final domain = await _domain;
         print('[svc] stopDaemon: booting out $domain/$_serviceLabel');
-        final result = await Process.run('launchctl', ['bootout', '$domain/$_serviceLabel']);
+        var result = await Process.run('launchctl', ['bootout', '$domain/$_serviceLabel']);
         print('[svc] stopDaemon: bootout exit=${result.exitCode} stderr=${result.stderr}');
-        if (result.exitCode != 0) return result.stderr.toString().trim();
+        await Future.delayed(const Duration(seconds: 1));
+        await _forceKillDaemon();
         return null;
       }
       return 'Daemon not running';
     } catch (e) {
       print('[svc] stopDaemon: exception: $e');
       return e.toString();
+    }
+  }
+
+  Future<void> _forceKillDaemon() async {
+    final socketPath = '${Platform.environment['HOME'] ?? '/tmp'}/.cloudflared/cloudflare-manager.sock';
+    if (!File(socketPath).existsSync()) return;
+    try {
+      print('[svc] _forceKillDaemon: socket still exists, force-killing...');
+      await Process.run('pkill', ['-f', 'cloudflare_manager.dart daemon start']);
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (File(socketPath).existsSync()) {
+        await File(socketPath).delete();
+      }
+    } catch (e) {
+      print('[svc] _forceKillDaemon: error: $e');
     }
   }
 

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'app_storage.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -8,7 +8,7 @@ class TrayService with TrayListener {
   TrayService._();
   static final instance = TrayService._();
 
-  final _storage = const FlutterSecureStorage();
+  final _storage = AppStorage.instance;
   bool _closeToTray = false;
   bool _autoStart = false;
   bool _initialized = false;

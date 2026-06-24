@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'app_storage.dart';
 import 'cloudflare_service.dart';
 import 'daemon/cf_api_client.dart';
 import 'tray_service.dart';
@@ -15,7 +15,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _storage = const FlutterSecureStorage();
+  final _storage = AppStorage.instance;
   final _tokenController = TextEditingController();
   final _accountIdController = TextEditingController();
   final _minPortController = TextEditingController();

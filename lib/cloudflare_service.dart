@@ -1,17 +1,15 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'app_storage.dart';
 
 class CloudflareService {
   static const String tokenKey = 'cf_api_token';
   static const String accountIdKey = 'cf_account_id';
   static const String baseUrl = 'https://api.cloudflare.com/client/v4';
-  
-  static const _storage = FlutterSecureStorage();
 
   static Future<Map<String, String>> _getHeaders() async {
-    final token = await _storage.read(key: tokenKey);
+    final token = await AppStorage.instance.read(key: tokenKey);
     return {
       'Authorization': 'Bearer $token',
       'Content-Type': 'application/json',
@@ -176,7 +174,7 @@ class CloudflareService {
   // List all tunnels for the account
   static Future<List<Map<String, dynamic>>> listTunnels() async {
     try {
-      final accountId = await _storage.read(key: accountIdKey);
+      final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
       
       final response = await http.get(
@@ -198,7 +196,7 @@ class CloudflareService {
   // Get tunnel configuration (ingress rules)
   static Future<Map<String, dynamic>?> getTunnelConfig(String tunnelId) async {
     try {
-      final accountId = await _storage.read(key: accountIdKey);
+      final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
       
       final response = await http.get(
@@ -220,7 +218,7 @@ class CloudflareService {
   // Create a new Zero Trust Tunnel
   static Future<Map<String, dynamic>?> createTunnel(String name) async {
     try {
-      final accountId = await _storage.read(key: accountIdKey);
+      final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
       
       // Generate a 32-byte secret (Base64 encoded)
@@ -289,7 +287,7 @@ class CloudflareService {
   // Delete a Tunnel
   static Future<bool> deleteTunnel(String tunnelId) async {
     try {
-      final accountId = await _storage.read(key: accountIdKey);
+      final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
 
       final response = await http.delete(
@@ -347,7 +345,7 @@ class CloudflareService {
   // Configure Tunnel Remote Ingress
   static Future<bool> configureTunnel(String tunnelId, String hostname, int localPort) async {
     try {
-      final accountId = await _storage.read(key: accountIdKey);
+      final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
       
       final response = await http.put(

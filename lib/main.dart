@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:window_manager/window_manager.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -25,6 +24,7 @@ import 'har_exporter.dart';
 import 'tray_service.dart';
 import 'tunnel_service_manager.dart';
 import 'daemon/ipc_client.dart';
+import 'app_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:brotli/brotli.dart';
@@ -133,7 +133,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   bool _isDaemonInstalled = false;
   bool _isDaemonLoading = false;
   final DaemonClient _daemonClient = DaemonClient();
-  final _secureStorage = const FlutterSecureStorage();
+  final _appStorage = AppStorage.instance;
 
   final _portsSearchController = TextEditingController();
   final _tunnelsSearchController = TextEditingController();
@@ -949,8 +949,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Future<void> _loadPortRange() async {
-    final min = await _secureStorage.read(key: 'auto_bind_min_port');
-    final max = await _secureStorage.read(key: 'auto_bind_max_port');
+    final min = await _appStorage.read(key: 'auto_bind_min_port');
+    final max = await _appStorage.read(key: 'auto_bind_max_port');
     if (min != null) _autoBindMinPort = int.tryParse(min);
     if (max != null) _autoBindMaxPort = int.tryParse(max);
   }
