@@ -13,6 +13,7 @@ import 'rate_alert_screen.dart';
 import 'webhook_service.dart';
 import 'rate_alert_service.dart';
 import 'daemon/events.dart';
+import 'daemon/daemon.dart' as daemon_mod;
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
 import 'tunnel_health.dart';
@@ -28,8 +29,14 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:brotli/brotli.dart';
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (args.contains('daemon') && args.contains('start')) {
+    await _runDaemonOnly();
+    return;
+  }
+
   await windowManager.ensureInitialized();
 
   const windowOptions = WindowOptions(
@@ -44,6 +51,21 @@ void main() async {
   });
 
   runApp(const CloudflareManagerApp());
+}
+
+Future<void> _runDaemonOnly() async {
+  final home = Platform.environment['HOME'] ?? '/tmp';
+  final configPath = '$home/.cloudflared/app-tunnels.json';
+
+  final daemon = daemon_mod.CloudflareDaemon(
+    configPath: configPath,
+    onEvent: (event) {},
+  );
+
+  await daemon.start();
+
+  // Keep the isolate alive indefinitely
+  await Completer<void>().future;
 }
 
 class CloudflareManagerApp extends StatelessWidget {
