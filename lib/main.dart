@@ -29,6 +29,12 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:brotli/brotli.dart';
 
+const _debugPrint = !bool.fromEnvironment('dart.vm.product');
+
+void _log(String msg) {
+  if (_debugPrint) print(msg);
+}
+
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -190,7 +196,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   Future<void> _checkDaemonStatus() async {
     final running = await _daemonClient.isDaemonRunning;
     final installed = await TunnelServiceManager.instance.isServiceInstalled();
-    print('[app] _checkDaemonStatus: running=$running installed=$installed socketPath=${_daemonClient.socketPath}');
+    _log('[app] _checkDaemonStatus: running=$running installed=$installed socketPath=${_daemonClient.socketPath}');
     if (mounted) {
       setState(() {
         _isDaemonRunning = running;
@@ -207,37 +213,37 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     }
     setState(() => _isDaemonLoading = true);
     
-    print('[app] _startDaemon: starting via service manager...');
+    _log('[app] _startDaemon: starting via service manager...');
     final installed = await TunnelServiceManager.instance.isServiceInstalled();
     if (!installed) {
       final error = await TunnelServiceManager.instance.installService();
       if (error != null) {
-        print('[app] _startDaemon: install failed: $error');
+        _log('[app] _startDaemon: install failed: $error');
         _showToast('Failed to install service: $error', isError: true);
         await _checkDaemonStatus();
         setState(() => _isDaemonLoading = false);
         return;
       }
-      print('[app] _startDaemon: install succeeded');
+      _log('[app] _startDaemon: install succeeded');
       _showToast('Service installed and started', isInfo: true);
     } else {
       final error = await TunnelServiceManager.instance.startDaemon();
       if (error != null) {
-        print('[app] _startDaemon: startDaemon error: $error');
+        _log('[app] _startDaemon: startDaemon error: $error');
         _showToast('Failed to start daemon: $error', isError: true);
       } else {
-        print('[app] _startDaemon: startDaemon ok');
+        _log('[app] _startDaemon: startDaemon ok');
         _showToast('Daemon started', isInfo: true);
       }
     }
-    print('[app] _startDaemon: waiting for daemon socket...');
+    _log('[app] _startDaemon: waiting for daemon socket...');
     for (var i = 0; i < 10; i++) {
       await Future.delayed(const Duration(seconds: 1));
       await _checkDaemonStatus();
-      print('[app] _startDaemon: check $i _isDaemonRunning=$_isDaemonRunning');
+      _log('[app] _startDaemon: check $i _isDaemonRunning=$_isDaemonRunning');
       if (_isDaemonRunning) break;
     }
-    print('[app] _startDaemon: done, _isDaemonRunning=$_isDaemonRunning');
+    _log('[app] _startDaemon: done, _isDaemonRunning=$_isDaemonRunning');
     setState(() => _isDaemonLoading = false);
   }
 

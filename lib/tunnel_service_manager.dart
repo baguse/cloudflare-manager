@@ -3,6 +3,12 @@ import 'dart:io';
 
 import 'daemon/ipc_client.dart';
 
+const _debugPrint = !bool.fromEnvironment('dart.vm.product');
+
+void _log(String msg) {
+  if (_debugPrint) print(msg);
+}
+
 class TunnelServiceManager {
   static final instance = TunnelServiceManager._();
   TunnelServiceManager._();
@@ -83,10 +89,10 @@ class TunnelServiceManager {
         : Directory.current.path;
     final cliScript = '$projectDir/bin/cloudflare_manager.dart';
 
-    print('[svc] installService: exe=$exe');
-    print('[svc] installService: scriptPath=$scriptPath');
-    print('[svc] installService: projectDir=$projectDir');
-    print('[svc] installService: cliScript=$cliScript');
+    _log('[svc] installService: exe=$exe');
+    _log('[svc] installService: scriptPath=$scriptPath');
+    _log('[svc] installService: projectDir=$projectDir');
+    _log('[svc] installService: cliScript=$cliScript');
 
     if (Platform.isLinux) {
       final dir = Directory(_serviceFileDir);
@@ -110,21 +116,21 @@ class TunnelServiceManager {
       final dir = Directory(_serviceFileDir);
       if (!await dir.exists()) await dir.create(recursive: true);
       final useDart = await File(cliScript).exists();
-      print('[svc] installService: useDart=$useDart');
+      _log('[svc] installService: useDart=$useDart');
       String execLine;
       if (useDart) {
         final dartExe = await _findDart();
         execLine = '$dartExe run $cliScript daemon start';
-        print('[svc] installService: dartExe=$dartExe');
+        _log('[svc] installService: dartExe=$dartExe');
       } else {
         execLine = '$exe daemon start';
       }
-      print('[svc] installService: plist path=$_serviceFilePath');
-      print('[svc] installService: execLine=$execLine');
+      _log('[svc] installService: plist path=$_serviceFilePath');
+      _log('[svc] installService: execLine=$execLine');
       await File(_serviceFilePath).writeAsString(_macosPlistContent(execLine.split(' ')));
       final domain = await _domain;
       final bootResult = await Process.run('launchctl', ['bootstrap', domain, _serviceFilePath]);
-      print('[svc] installService: bootstrap exit=${bootResult.exitCode} stdout=${bootResult.stdout} stderr=${bootResult.stderr}');
+      _log('[svc] installService: bootstrap exit=${bootResult.exitCode} stdout=${bootResult.stdout} stderr=${bootResult.stderr}');
       if (bootResult.exitCode != 0) {
         return 'bootstrap failed: ${bootResult.stderr}'.trim();
       }
@@ -182,7 +188,7 @@ class TunnelServiceManager {
 
     if (Platform.isMacOS) {
       final domain = await _domain;
-      print('[svc] uninstallService: booting out $domain/$_serviceLabel');
+      _log('[svc] uninstallService: booting out $domain/$_serviceLabel');
       await Process.run('launchctl', ['bootout', '$domain/$_serviceLabel']);
       final file = File(_serviceFilePath);
       if (await file.exists()) await file.delete();
@@ -202,14 +208,14 @@ class TunnelServiceManager {
       if (Platform.isMacOS) {
         final domain = await _domain;
 
-        print('[svc] startDaemon: booting out old instance...');
+        _log('[svc] startDaemon: booting out old instance...');
         await Process.run('launchctl', ['bootout', '$domain/$_serviceLabel']);
         await Future.delayed(const Duration(milliseconds: 500));
 
         await _writePlist();
-        print('[svc] startDaemon: bootstrapping $_serviceFilePath...');
+        _log('[svc] startDaemon: bootstrapping $_serviceFilePath...');
         final result = await Process.run('launchctl', ['bootstrap', domain, _serviceFilePath]);
-        print('[svc] startDaemon: bootstrap exit=${result.exitCode} stdout=${result.stdout} stderr=${result.stderr}');
+        _log('[svc] startDaemon: bootstrap exit=${result.exitCode} stdout=${result.stdout} stderr=${result.stderr}');
         if (result.exitCode != 0) {
           return 'bootstrap failed: ${result.stderr}'.trim();
         }
@@ -217,7 +223,7 @@ class TunnelServiceManager {
       }
       return 'Unsupported platform';
     } catch (e) {
-      print('[svc] startDaemon: exception: $e');
+      _log('[svc] startDaemon: exception: $e');
       return e.toString();
     }
   }
@@ -239,7 +245,7 @@ class TunnelServiceManager {
     } else {
       execLine = '$exe daemon start';
     }
-    print('[svc] _writePlist: execLine=$execLine');
+    _log('[svc] _writePlist: execLine=$execLine');
     await File(_serviceFilePath).writeAsString(_macosPlistContent(execLine.split(' ')));
   }
 
@@ -260,16 +266,16 @@ class TunnelServiceManager {
       }
       if (Platform.isMacOS) {
         final domain = await _domain;
-        print('[svc] stopDaemon: booting out $domain/$_serviceLabel');
+        _log('[svc] stopDaemon: booting out $domain/$_serviceLabel');
         var result = await Process.run('launchctl', ['bootout', '$domain/$_serviceLabel']);
-        print('[svc] stopDaemon: bootout exit=${result.exitCode} stderr=${result.stderr}');
+        _log('[svc] stopDaemon: bootout exit=${result.exitCode} stderr=${result.stderr}');
         await Future.delayed(const Duration(seconds: 1));
         await _forceKillDaemon();
         return null;
       }
       return 'Daemon not running';
     } catch (e) {
-      print('[svc] stopDaemon: exception: $e');
+      _log('[svc] stopDaemon: exception: $e');
       return e.toString();
     }
   }
@@ -278,14 +284,14 @@ class TunnelServiceManager {
     final socketPath = '${Platform.environment['HOME'] ?? '/tmp'}/.cloudflared/cloudflare-manager.sock';
     if (!File(socketPath).existsSync()) return;
     try {
-      print('[svc] _forceKillDaemon: socket still exists, force-killing...');
+      _log('[svc] _forceKillDaemon: socket still exists, force-killing...');
       await Process.run('pkill', ['-f', 'cloudflare_manager.dart daemon start']);
       await Future.delayed(const Duration(milliseconds: 500));
       if (File(socketPath).existsSync()) {
         await File(socketPath).delete();
       }
     } catch (e) {
-      print('[svc] _forceKillDaemon: error: $e');
+      _log('[svc] _forceKillDaemon: error: $e');
     }
   }
 

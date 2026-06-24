@@ -3,6 +3,12 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'app_storage.dart';
 
+const _debugPrint = !bool.fromEnvironment('dart.vm.product');
+
+void _analyticsLog(String msg) {
+  if (_debugPrint) print(msg);
+}
+
 class CloudflareService {
   static const String tokenKey = 'cf_api_token';
   static const String accountIdKey = 'cf_account_id';
@@ -401,7 +407,7 @@ query {
         body: json.encode({'query': query}),
       );
 
-      print('[analytics] fetchTunnelAnalytics status: ${resp.statusCode} for $hostname');
+      _analyticsLog('[analytics] fetchTunnelAnalytics status: ${resp.statusCode} for $hostname');
 
       if (resp.statusCode != 200) return {};
 
@@ -421,7 +427,7 @@ query {
           out[date] = (out[date] ?? 0) + requests;
         }
       }
-      print('[analytics] fetchTunnelAnalytics $hostname: ${out.length} day(s) of data, total=${out.values.fold(0, (a, b) => a + b)}');
+      _analyticsLog('[analytics] fetchTunnelAnalytics $hostname: ${out.length} day(s) of data, total=${out.values.fold(0, (a, b) => a + b)}');
       return out;
     } catch (_) {
       return {};
@@ -452,11 +458,11 @@ query {
         body: json.encode({'query': query}),
       ).timeout(const Duration(seconds: 15));
 
-      print('[analytics] GraphQL status: ${resp.statusCode}');
+      _analyticsLog('[analytics] GraphQL status: ${resp.statusCode}');
       if (resp.body.length > 1000) {
-        print('[analytics] GraphQL body: ${resp.body.substring(0, 1000)}...');
+        _analyticsLog('[analytics] GraphQL body: ${resp.body.substring(0, 1000)}...');
       } else {
-        print('[analytics] GraphQL body: $resp.body');
+        _analyticsLog('[analytics] GraphQL body: $resp.body');
       }
 
       if (resp.statusCode != 200) return null;
@@ -464,24 +470,24 @@ query {
       final body = json.decode(resp.body);
       final errors = body?['errors'] as List?;
       if (errors != null && errors.isNotEmpty) {
-        print('[analytics] Permission error — API token needs Zone > Analytics > Read permission');
+        _analyticsLog('[analytics] Permission error — API token needs Zone > Analytics > Read permission');
         return null;
       }
 
       final zones = body?['data']?['viewer']?['zones'] as List?;
       if (zones == null || zones.isEmpty) {
-        print('[analytics] No zones for $hostname');
+        _analyticsLog('[analytics] No zones for $hostname');
         return null;
       }
 
       final groups = zones[0]['httpRequestsAdaptiveGroups'] as List?;
       if (groups == null || groups.isEmpty) {
-        print('[analytics] No data for $hostname');
+        _analyticsLog('[analytics] No data for $hostname');
         return null;
       }
 
       final requests = (groups[0]['count'] as int?) ?? 0;
-      print('[analytics] $hostname: $requests req/h');
+      _analyticsLog('[analytics] $hostname: $requests req/h');
       return requests;
     } catch (_) {
       return null;

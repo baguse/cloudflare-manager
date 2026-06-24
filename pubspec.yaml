@@ -1,5 +1,5 @@
 name: cloudflare_manager
-description: "A new Flutter project."
+description: "Cloudflare Tunnel manager — create, bind, and monitor Cloudflare tunnels from your desktop."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -70,6 +70,7 @@ flutter:
 
   assets:
     - assets/tray_icon.png
+    - assets/logo_bw.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

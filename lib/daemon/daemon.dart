@@ -7,6 +7,12 @@ import 'tunnel_runner.dart';
 import '../webhook_service.dart';
 import '../cloudflared_service.dart';
 
+const _debugPrint = !bool.fromEnvironment('dart.vm.product');
+
+void _log(String msg) {
+  if (_debugPrint) print(msg);
+}
+
 class CloudflareDaemon {
   final String configPath;
   final void Function(DaemonEvent event)? onEvent;
@@ -58,7 +64,7 @@ class CloudflareDaemon {
         }
       }
     } catch (e) {
-      print('[daemon] Error reading daemon config: $e');
+      _log('[daemon] Error reading daemon config: $e');
     }
   }
 
@@ -93,8 +99,8 @@ class CloudflareDaemon {
     await _startIpcServer();
     await _loadTunnels();
 
-    print('[daemon] Started, managing ${_runners.length} tunnel(s), max retries=$_maxStartRetries');
-    print('[daemon] IPC socket: $socketPath]');
+    _log('[daemon] Started, managing ${_runners.length} tunnel(s), max retries=$_maxStartRetries');
+    _log('[daemon] IPC socket: $socketPath]');
   }
 
   Future<void> stop() async {
@@ -122,7 +128,7 @@ class CloudflareDaemon {
     if (await sockFile.exists()) await sockFile.delete();
 
     if (!_shutdownCompleter.isCompleted) _shutdownCompleter.complete();
-    print('[daemon] Stopped');
+    _log('[daemon] Stopped');
   }
 
   Future<void> waitForShutdown() => _shutdownCompleter.future;
@@ -130,7 +136,7 @@ class CloudflareDaemon {
   Future<void> _loadTunnels() async {
     final file = File(configPath);
     if (!await file.exists()) {
-      print('[daemon] No config found at $configPath');
+      _log('[daemon] No config found at $configPath');
       return;
     }
 
@@ -138,7 +144,7 @@ class CloudflareDaemon {
     if (data is! Map) return;
 
     if (_bootDelaySeconds > 0) {
-      print('[daemon] Waiting ${_bootDelaySeconds}s for network...');
+      _log('[daemon] Waiting ${_bootDelaySeconds}s for network...');
       await Future.delayed(Duration(seconds: _bootDelaySeconds));
     }
 
@@ -305,7 +311,7 @@ class CloudflareDaemon {
 
         case 'shutdown':
           _sendIpc(client, {'ok': true});
-          stop().catchError((e) => print('[daemon] Stop error: $e'));
+          stop().catchError((e) => _log('[daemon] Stop error: $e'));
           break;
 
         case 'reload_webhooks':
@@ -342,7 +348,7 @@ class CloudflareDaemon {
     onEvent?.call(event);
     
     final future = WebhookService.instance.triggerWebhooks(event).catchError((e) {
-      print('[daemon] Webhook trigger error: $e');
+      _log('[daemon] Webhook trigger error: $e');
     });
     _pendingWebhooks.add(future);
     future.whenComplete(() => _pendingWebhooks.remove(future));
@@ -353,7 +359,7 @@ class CloudflareDaemon {
     try {
       await Future.wait(_pendingWebhooks.toList()).timeout(timeout);
     } catch (_) {
-      print('[daemon] Webhook flush timed out');
+      _log('[daemon] Webhook flush timed out');
     }
   }
 }

@@ -75,9 +75,9 @@ class TrayService with TrayListener {
     trayManager.addListener(this);
 
     if (Platform.isLinux) {
-      await trayManager.setIcon('assets/tray_icon.png');
+      await trayManager.setIcon('assets/logo_bw.png');
     } else if (Platform.isMacOS) {
-      await trayManager.setIcon('assets/tray_icon.png');
+      await trayManager.setIcon('assets/logo_bw.png');
     }
 
     await trayManager.setContextMenu(
