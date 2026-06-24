@@ -1272,8 +1272,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
   Widget _buildLocalServicesPanel() {
     final filteredPorts = _openPorts.where((p) =>
-        p.port.toString().contains(_portsSearchQuery) ||
-        p.processName.toLowerCase().contains(_portsSearchQuery)
+        _isPortAllowed(p.port) &&
+        (p.port.toString().contains(_portsSearchQuery) ||
+        p.processName.toLowerCase().contains(_portsSearchQuery))
     ).toList();
 
     return _buildCardPanel(
@@ -1292,7 +1293,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             child: filteredPorts.isEmpty
                 ? Center(
                     child: Text(
-                      _openPorts.isEmpty ? 'No listening ports.' : 'No matches found.',
+                      _openPorts.isEmpty ? 'No listening ports.' : (_autoBindMinPort != null || _autoBindMaxPort != null ? 'No ports in range.' : 'No matches found.'),
                       style: const TextStyle(color: Colors.grey),
                     ),
                   )
