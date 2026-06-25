@@ -71,7 +71,7 @@ Exec=$NAME
 Icon=$NAME
 Type=Application
 Categories=Network;
-Terminal=false
+StartupWMClass=$NAME
 StartupNotify=true
 DESKTOP
 
