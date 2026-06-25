@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "$0")" && cd .. && pwd)"
+
 BUILD_DIR="$PROJECT_DIR/build/linux/x64/release/bundle"
 DEB_ROOT="$PROJECT_DIR/build/deb"
 DEB_CONTROL="$DEB_ROOT/DEBIAN"
@@ -31,6 +32,28 @@ mkdir -p "$DEB_ROOT/usr/share/doc/$NAME"
 
 echo "=== Copying application files ==="
 cp -r "$BUILD_DIR"/* "$DEB_ROOT/usr/lib/$NAME/"
+
+echo "=== Copying icon ==="
+ICON_DIR="$PROJECT_DIR/macos/Runner/Assets.xcassets/AppIcon.appiconset"
+if [ -d "$ICON_DIR" ]; then
+  declare -A SIZE_MAP=(
+    [16]="app_icon_16.png"
+    [32]="app_icon_32.png"
+    [64]="app_icon_64.png"
+    [128]="app_icon_128.png"
+    [256]="app_icon_256.png"
+  )
+  for size in "${!SIZE_MAP[@]}"; do
+    src="$ICON_DIR/${SIZE_MAP[$size]}"
+    if [ -f "$src" ]; then
+      mkdir -p "$DEB_ROOT/usr/share/icons/hicolor/${size}x${size}/apps"
+      cp "$src" "$DEB_ROOT/usr/share/icons/hicolor/${size}x${size}/apps/$NAME.png"
+      echo "  Copied ${size}x${size}"
+    fi
+  done
+else
+  echo "  WARNING: No macOS icon set found, menu entry will be blank"
+fi
 
 echo "=== Creating launch script ==="
 cat > "$DEB_ROOT/usr/bin/$NAME" << LAUNCH
@@ -76,6 +99,18 @@ Description: Cloudflare Tunnel Manager
    - QR code generation for tunnel URLs
    - System tray support
 CONTROL
+
+  cat > "$DEB_CONTROL/postinst" << POSTINST
+#!/bin/sh
+set -e
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache /usr/share/icons/hicolor/ || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications || true
+fi
+POSTINST
+  chmod +x "$DEB_CONTROL/postinst"
 
 echo "=== Building .deb package ==="
 DEB_FILE="$DEB_OUT/${NAME}_${VERSION}_${ARCH}.deb"
