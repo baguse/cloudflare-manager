@@ -959,6 +959,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     final max = await _appStorage.read(key: 'auto_bind_max_port');
     if (min != null) _autoBindMinPort = int.tryParse(min);
     if (max != null) _autoBindMaxPort = int.tryParse(max);
+    if (mounted) setState(() {});
   }
 
   bool _isPortAllowed(int port) {
@@ -1088,7 +1089,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         ListTile(
           leading: const Icon(Icons.settings, color: Colors.grey),
           title: const Text('Settings', style: TextStyle(color: Colors.grey)),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          onTap: () async {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+            _loadPortRange();
+          },
         ),
         ListTile(
           leading: Icon(
@@ -1175,7 +1179,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         const SizedBox(height: 8),
         _sidebarIcon(Icons.speed, 'Rate Alerts', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen()))),
         const SizedBox(height: 8),
-        _sidebarIcon(Icons.settings, 'Settings', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
+        _sidebarIcon(Icons.settings, 'Settings', onTap: () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+          _loadPortRange();
+        }),
         const SizedBox(height: 8),
         _sidebarIcon(
           _watcher.isEnabled ? Icons.visibility : Icons.visibility_off,
