@@ -8,7 +8,7 @@
 PRODUCT_NAME = Cloudflare Manager
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.cloudflareManager
+PRODUCT_BUNDLE_IDENTIFIER = id.my.baguse.cloudflareManager
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 Cloudflare Manager. All rights reserved.
