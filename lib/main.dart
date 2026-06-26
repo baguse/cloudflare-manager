@@ -38,6 +38,8 @@ void _log(String msg) {
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final startHidden = args.contains('--hidden');
+
   if (args.contains('daemon') && args.contains('start')) {
     await _runDaemonOnly();
     return;
@@ -52,8 +54,12 @@ void main(List<String> args) async {
     title: 'Cloudflare Manager',
   );
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
+    if (startHidden) {
+      await windowManager.hide();
+    } else {
+      await windowManager.show();
+      await windowManager.focus();
+    }
   });
 
   runApp(const CloudflareManagerApp());

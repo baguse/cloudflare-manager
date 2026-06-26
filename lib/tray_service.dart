@@ -131,7 +131,7 @@ class TrayService with TrayListener {
 [Desktop Entry]
 Type=Application
 Name=Cloudflare Manager
-Exec=$exe
+Exec=$exe --hidden
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
