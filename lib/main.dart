@@ -194,9 +194,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Future<void> _checkDaemonStatus() async {
-    final running = await _daemonClient.isDaemonRunning;
+    final running = await TunnelServiceManager.instance.isServiceRunning();
     final installed = await TunnelServiceManager.instance.isServiceInstalled();
-    _log('[app] _checkDaemonStatus: running=$running installed=$installed socketPath=${_daemonClient.socketPath}');
     if (mounted) {
       setState(() {
         _isDaemonRunning = running;
@@ -250,14 +249,32 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   Future<void> _stopDaemon() async {
     if (_isDaemonLoading) return;
     setState(() => _isDaemonLoading = true);
-    
-    final error = await TunnelServiceManager.instance.stopDaemon();
-    if (error != null) {
-      _showToast('Failed to stop daemon: $error', isError: true);
+
+    if (_isDaemonInstalled) {
+      final error = await TunnelServiceManager.instance.stopDaemon();
+      if (error != null) {
+        _showToast('Failed to stop daemon: $error', isError: true);
+        await _checkDaemonStatus();
+        setState(() => _isDaemonLoading = false);
+        return;
+      }
+    }
+
+    try {
+      final client = DaemonClient();
+      await client.shutdown();
+    } catch (_) {}
+
+    for (var i = 0; i < 5; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+      await _checkDaemonStatus();
+      if (!_isDaemonRunning) break;
+    }
+    if (_isDaemonRunning) {
+      _showToast('Daemon may still be running', isInfo: true);
     } else {
       _showToast('Daemon stopped', isInfo: true);
     }
-    await _checkDaemonStatus();
     setState(() => _isDaemonLoading = false);
   }
 
@@ -1111,10 +1128,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           onTap: _killOrphanedDaemons,
         ),
         ListTile(
-          leading: Icon(Icons.dns, color: _isDaemonRunning ? Colors.green : Colors.grey),
+          leading: Icon(Icons.dns, color: _isDaemonRunning ? Colors.green : (_isDaemonInstalled ? Colors.orange : Colors.grey)),
           title: Text(
-            'Daemon: ${_isDaemonRunning ? "Running" : "Stopped"}',
-            style: TextStyle(color: _isDaemonRunning ? Colors.green : Colors.grey),
+            _isDaemonRunning
+                ? 'Daemon: Running'
+                : (_isDaemonInstalled ? 'Daemon: Stopped' : 'Daemon: Not installed'),
+            style: TextStyle(
+              color: _isDaemonRunning
+                  ? Colors.green
+                  : (_isDaemonInstalled ? Colors.orange : Colors.grey),
+            ),
           ),
           subtitle: const Text(
             'User-level service',
@@ -1140,29 +1163,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   : (_isCloudflaredInstalled ? _startDaemon : null),
         ),
         const Spacer(),
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Row(
-            children: [
-              Icon(
-                _isCloudflaredInstalled ? Icons.check_circle : Icons.error,
-                color: _isCloudflaredInstalled ? Colors.green : Colors.redAccent,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(_statusLabel, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ],
+        if (!_isCloudflaredInstalled)
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.redAccent, size: 20),
+                const SizedBox(width: 8),
+                const Text('cloudflared not found', style: TextStyle(fontSize: 12, color: Colors.redAccent)),
+              ],
+            ),
           ),
-        ),
       ],
     );
-  }
-
-  String get _statusLabel {
-    if (!_isCloudflaredInstalled) return 'cloudflared missing';
-    if (!_isDaemonInstalled) return 'Daemon not installed';
-    if (!_isDaemonRunning) return 'Daemon stopped';
-    return 'Daemon Ready';
   }
 
   Widget _buildNarrowSidebar() {
@@ -3301,12 +3314,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                     SwitchListTile(
                       title: const Text('Auto-start on boot', style: TextStyle(fontSize: 14)),
                       subtitle: Text(
-                        _isDaemonInstalled ? 'Daemon will start this tunnel when the system boots' : 'Daemon not installed — install it from Settings first',
-                        style: TextStyle(fontSize: 11, color: _isDaemonInstalled ? Colors.grey : Colors.redAccent),
+                        _isDaemonRunning
+                            ? 'Daemon is running — this tunnel will auto-start on boot'
+                            : _isDaemonInstalled
+                                ? 'Daemon installed — this tunnel will auto-start when the daemon runs'
+                                : 'Daemon not installed — start the daemon first via the sidebar',
+                        style: TextStyle(fontSize: 11, color: _isDaemonRunning || _isDaemonInstalled ? Colors.grey : Colors.redAccent),
                       ),
                       value: serviceEnabled,
                       activeThumbColor: const Color(0xFFF6821F),
-                      onChanged: _isDaemonInstalled ? (v) {
+                      onChanged: (_isDaemonRunning || _isDaemonInstalled) ? (v) {
                         _tunnelConfigs[tunnelId] ??= {};
                         _tunnelConfigs[tunnelId]!['serviceEnabled'] = v.toString();
                         setDialogState(() {});

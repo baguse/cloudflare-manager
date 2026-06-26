@@ -51,7 +51,17 @@ class TunnelServiceManager {
   }
 
   Future<bool> isServiceInstalled() async {
-    return File(_serviceFilePath).exists();
+    if (Platform.isLinux) {
+      final fileExists = await File(_serviceFilePath).exists();
+      if (!fileExists) return false;
+      try {
+        final result = await Process.run('systemctl', ['--user', 'is-enabled', _linuxUnitName]);
+        return result.exitCode == 0;
+      } catch (_) {
+        return true;
+      }
+    }
+    return await File(_serviceFilePath).exists();
   }
 
   Future<bool> isServiceRunning() async {
