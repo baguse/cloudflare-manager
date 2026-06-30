@@ -1088,7 +1088,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         const SizedBox(height: 40),
         const Icon(Icons.cloud_circle, size: 64, color: Color(0xFFF6821F)),
         const SizedBox(height: 16),
-        const Text('Zero Trust\nManager', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.2)),
+        const Text('Cloudflare\nManager', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.2)),
         const SizedBox(height: 40),
         ListTile(
           leading: const Icon(Icons.dashboard, color: Color(0xFFF6821F)),
