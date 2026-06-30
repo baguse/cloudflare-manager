@@ -47,6 +47,10 @@ void main(List<String> args) async {
 
   await windowManager.ensureInitialized();
 
+  if (startHidden) {
+    await windowManager.hide();
+  }
+
   const windowOptions = WindowOptions(
     size: Size(1280, 720),
     minimumSize: Size(900, 600),
@@ -54,9 +58,7 @@ void main(List<String> args) async {
     title: 'Cloudflare Manager',
   );
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    if (startHidden) {
-      await windowManager.hide();
-    } else {
+    if (!startHidden) {
       await windowManager.show();
       await windowManager.focus();
     }

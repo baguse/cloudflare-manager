@@ -16,6 +16,13 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
+  if (self->dart_entrypoint_arguments != nullptr) {
+    for (int i = 0; self->dart_entrypoint_arguments[i] != nullptr; i++) {
+      if (g_strcmp0(self->dart_entrypoint_arguments[i], "--hidden") == 0) {
+        return; // Don't show the window
+      }
+    }
+  }
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
