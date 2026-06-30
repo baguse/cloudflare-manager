@@ -592,31 +592,31 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     final Map<String, dynamic> zone = result['zone'];
     final String fullDomain = '$subdomain.${zone['name']}';
 
+    String? tunnelId;
     try {
       _showToast('Creating tunnel...', isInfo: true);
       final tunnelData = await CloudflareService.createTunnel('tunnel-$subdomain-$port');
       if (tunnelData == null) throw Exception('Failed to create tunnel');
 
-      final tunnelId = tunnelData['id'];
+      tunnelId = tunnelData['id'];
       final tunnelToken = tunnelData['token'];
-
-      _fireWebhook(DaemonEventType.tunnelCreated, tunnelId: tunnelId, hostname: fullDomain, port: port);
+      final id = tunnelId!;
 
       _showToast('Configuring routing...', isInfo: true);
-      final configured = await CloudflareService.configureTunnel(tunnelId, fullDomain, port);
+      final configured = await CloudflareService.configureTunnel(id, fullDomain, port);
       if (!configured) throw Exception('Failed to configure tunnel routing');
 
       _showToast('Creating DNS record...', isInfo: true);
-      final dnsCreated = await CloudflareService.createTunnelDnsRecord(zone['id'], subdomain, tunnelId);
+      final dnsCreated = await CloudflareService.createTunnelDnsRecord(zone['id'], subdomain, id);
       if (!dnsCreated) throw Exception('Failed to create DNS record');
 
-      await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken, hostname: fullDomain);
+      await CloudflaredService.registerAppTunnel(id, port, token: tunnelToken, hostname: fullDomain);
 
       _showToast('Starting via daemon...', isInfo: true);
 
       final client = DaemonClient();
       if (!await client.connect()) throw Exception('Daemon not reachable');
-      final bindResult = await client.bindTunnel(tunnelId, tunnelToken, fullDomain, port);
+      final bindResult = await client.bindTunnel(id, tunnelToken, fullDomain, port);
       client.disconnect();
 
       if (bindResult['ok'] != true) {
@@ -626,7 +626,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       final daemonPid = bindResult['pid'] as int?;
 
       _watcher.watch(
-        tunnelId: tunnelId,
+        tunnelId: id,
         port: port,
         hostname: fullDomain,
         token: tunnelToken,
@@ -634,7 +634,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       );
 
       final activeTunnel = ActiveTunnel(
-        tunnelId: tunnelId,
+        tunnelId: id,
         name: 'tunnel-$subdomain-$port',
         localPort: port,
         url: 'https://$fullDomain',
@@ -644,11 +644,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       setState(() => _activeTunnels.add(activeTunnel));
 
+      _fireWebhook(DaemonEventType.tunnelCreated, tunnelId: id, hostname: fullDomain, port: port);
+
       _showToast('Tunnel $fullDomain is active!');
       _fetchRemoteTunnels();
       Future.delayed(const Duration(seconds: 3), _checkTunnelConnectivity);
     } catch (e) {
-      _showToast('Error: $e', isError: true);
+      if (tunnelId != null) {
+        await CloudflaredService.unregisterAppTunnel(tunnelId);
+        await CloudflaredService.deleteCredentialsFile(tunnelId);
+        await CloudflareService.deleteTunnelDnsRecords(tunnelId);
+        await CloudflareService.deleteTunnel(tunnelId);
+      }
+      _showToast('Error: $e (rolled back)', isError: true);
     }
   }
 
