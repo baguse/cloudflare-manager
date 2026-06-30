@@ -393,12 +393,16 @@ class CloudflaredService {
   static Future<void> unregisterAppTunnel(String tunnelId) async {
     final file = _appTunnelMapFile();
     if (file == null) return;
-    final map = await readAppTunnelPortMap();
-    if (map.remove(tunnelId) != null) {
-      try {
-        await file.writeAsString(json.encode(map));
-      } catch (e) {
+    try {
+      final content = await file.exists() ? await file.readAsString() : '{}';
+      final data = json.decode(content);
+      if (data is Map) {
+        final map = Map<String, dynamic>.from(data);
+        if (map.remove(tunnelId) != null) {
+          await file.writeAsString(json.encode(map));
+        }
       }
+    } catch (e) {
     }
   }
 
