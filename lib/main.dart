@@ -2842,7 +2842,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               icon: const Icon(Icons.terminal, size: 20, color: Colors.grey,
                   ),
               tooltip: 'View Logs',
-              onPressed: () => _showLogsUnavailableDialog(),
+              onPressed: () => _showDetachedLogsDialog(tunnelId),
             ),
             IconButton(
               icon: const Icon(Icons.stop_circle, size: 28, color: Colors.redAccent),
@@ -3409,6 +3409,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (context) {
+        final logsNotifier = ValueNotifier<List<String>>(List.from(tunnel.logs.value));
+        if (tunnel.tunnelId != null && logsNotifier.value.isEmpty) {
+          _daemonClient.getTunnelLogs(tunnel.tunnelId!).then((result) {
+            if (result['ok'] == true && result['logs'] is List) {
+              logsNotifier.value = List<String>.from(result['logs']);
+            }
+          }).catchError((_) {});
+        }
         return Dialog(
           backgroundColor: const Color(0xFF0F172A),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -3431,7 +3439,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 const Divider(color: Color(0xFF334155)),
                 Expanded(
                   child: ValueListenableBuilder<List<String>>(
-                    valueListenable: tunnel.logs,
+                    valueListenable: logsNotifier,
                     builder: (context, logs, child) {
                       if (logs.isEmpty) return const Center(child: Text('No logs available yet.', style: const TextStyle(color: Colors.grey)));
                       return ListView.builder(
@@ -3448,6 +3456,60 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           ),
         );
       },
+    );
+  }
+
+  void _showDetachedLogsDialog(String? tunnelId) {
+    if (tunnelId == null) {
+      _showLogsUnavailableDialog();
+      return;
+    }
+    final logsNotifier = ValueNotifier<List<String>>([]);
+    _daemonClient.getTunnelLogs(tunnelId).then((result) {
+      if (result['ok'] == true && result['logs'] is List) {
+        logsNotifier.value = List<String>.from(result['logs']);
+      }
+    }).catchError((_) {});
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 600,
+          height: 400,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.terminal, color: Colors.greenAccent),
+                  const SizedBox(width: 8),
+                  Text('Logs for $tunnelId', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                ],
+              ),
+              const Divider(color: Color(0xFF334155)),
+              Expanded(
+                child: ValueListenableBuilder<List<String>>(
+                  valueListenable: logsNotifier,
+                  builder: (context, logs, child) {
+                    if (logs.isEmpty) return const Center(child: Text('Fetching logs from daemon...', style: TextStyle(color: Colors.grey)));
+                    return ListView.builder(
+                      itemCount: logs.length,
+                      itemBuilder: (context, index) {
+                        return Text(logs[index], style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.white70));
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
