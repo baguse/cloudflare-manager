@@ -19,6 +19,7 @@ class TunnelRunner {
   TunnelRunState _state = TunnelRunState.idle;
   final List<String> _logs = [];
   Timer? _healthTimer;
+  Timer? _restartTimer;
   int _restartCount = 0;
   static const _baseDelay = Duration(seconds: 2);
   DateTime? _startedAt;
@@ -100,6 +101,7 @@ class TunnelRunner {
   Future<void> stop() async {
     _state = TunnelRunState.stopped;
     _healthTimer?.cancel();
+    _restartTimer?.cancel();
     _process?.kill(ProcessSignal.sigterm);
     await _process?.exitCode.timeout(
       const Duration(seconds: 5),
@@ -126,7 +128,8 @@ class TunnelRunner {
     final delay = _baseDelay * (1 << _restartCount.clamp(0, 5));
     _restartCount++;
     _addLog('Restarting in ${delay.inSeconds}s (attempt $_restartCount/$maxRestarts)...');
-    Timer(delay, () {
+    _restartTimer?.cancel();
+    _restartTimer = Timer(delay, () {
       if (_state == TunnelRunState.crashed) {
         onEvent(DaemonEvent(
           type: DaemonEventType.tunnelReconnected,
