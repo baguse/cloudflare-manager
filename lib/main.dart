@@ -1083,8 +1083,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Widget _buildWideSidebar() {
-    return Column(
-      children: [
+    return SingleChildScrollView(
+      child: Column(
+        children: [
         const SizedBox(height: 40),
         const Icon(Icons.cloud_circle, size: 64, color: Color(0xFFF6821F)),
         const SizedBox(height: 16),
@@ -1177,7 +1178,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   ? _stopDaemon
                   : (_isCloudflaredInstalled ? _startDaemon : null),
         ),
-        const Spacer(),
         if (!_isCloudflaredInstalled)
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -1190,11 +1190,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             ),
           ),
       ],
+      ),
     );
   }
 
   Widget _buildNarrowSidebar() {
-    return Column(
+    return SingleChildScrollView(
+      child: Column(
       children: [
         const SizedBox(height: 16),
         const Icon(Icons.cloud_circle, size: 32, color: Color(0xFFF6821F)),
@@ -1232,6 +1234,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           ),
         ),
       ],
+      ),
     );
   }
 
