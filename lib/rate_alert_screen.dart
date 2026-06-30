@@ -66,9 +66,9 @@ class _RateAlertScreenState extends State<RateAlertScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1a1a1a),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF2d2d2d),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Rate Alerts'),
         actions: [
           if (_alerts.isNotEmpty)
@@ -108,7 +108,7 @@ class _RateAlertScreenState extends State<RateAlertScreen> {
                   itemBuilder: (context, index) {
                     final alert = _alerts[index];
                     return Card(
-                      color: const Color(0xFF2d2d2d),
+                      color: Theme.of(context).colorScheme.surface,
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: Icon(Icons.speed, color: alert.enabled ? const Color(0xFFF6821F) : Colors.grey),
@@ -231,9 +231,9 @@ class _RateAlertEditorScreenState extends State<RateAlertEditorScreen> {
         : null;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF1a1a1a),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF2d2d2d),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: Text(widget.alert == null ? 'New Alert' : 'Edit Alert'),
         actions: [
           TextButton.icon(

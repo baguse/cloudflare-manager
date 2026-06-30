@@ -5,6 +5,14 @@ import 'package:file_picker/file_picker.dart';
 import 'webhook_service.dart';
 import 'rate_alert_service.dart';
 
+Color _cardBg(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF1E293B) : Colors.white;
+
+Color _panelBg(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF0F172A) : const Color(0xFFF5F5F5);
+
 class BackupRestoreScreen extends StatefulWidget {
   const BackupRestoreScreen({super.key});
 
@@ -111,7 +119,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: _cardBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Text('Restore backup?'),
         content: Text('Overwrite ${selected.length} section(s) at $_configDir?'),
@@ -165,7 +173,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E293B),
+          backgroundColor: _cardBg(context),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: const Text('Select items to restore'),
           content: SizedBox(
@@ -230,7 +238,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     return await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: _cardBg(context),
         title: Text(title),
         content: Form(
           key: formKey,
@@ -239,7 +247,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
             decoration: InputDecoration(
               hintText: hint,
               filled: true,
-              fillColor: const Color(0xFF0F172A),
+              fillColor: _panelBg(context),
               border: const OutlineInputBorder(borderSide: BorderSide.none),
             ),
             validator: (v) => (v == null || v.trim().isEmpty) ? 'Path required' : null,
@@ -271,9 +279,9 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: _panelBg(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: _cardBg(context),
         title: const Text('Backup & Restore'),
       ),
       body: _loading
@@ -313,7 +321,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                           icon: const Icon(Icons.restore),
                           label: const Text('Restore'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1E293B),
+                            backgroundColor: _cardBg(context),
                             foregroundColor: const Color(0xFFF6821F),
                             minimumSize: const Size(0, 48),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

@@ -82,7 +82,7 @@ class _WebhookLogsScreenState extends State<WebhookLogsScreen> {
   void _showLogDetails(WebhookLog log) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF2d2d2d),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.7,
@@ -202,9 +202,9 @@ class _WebhookLogsScreenState extends State<WebhookLogsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1a1a1a),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF2d2d2d),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: Text(widget.webhookName != null ? 'Logs: ${widget.webhookName}' : 'Webhook Logs'),
         actions: [
           PopupMenuButton<String>(
@@ -272,7 +272,7 @@ class _WebhookLogsScreenState extends State<WebhookLogsScreen> {
       label: Text(label),
       selected: selected,
       onSelected: (_) => setState(() => _filter = value),
-      backgroundColor: const Color(0xFF2d2d2d),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       selectedColor: const Color(0xFFF6821F),
       labelStyle: TextStyle(
         color: selected ? Colors.white : Colors.grey,
@@ -304,7 +304,7 @@ class _WebhookLogsScreenState extends State<WebhookLogsScreen> {
       itemBuilder: (context, index) {
         final log = _filteredLogs[index];
         return Card(
-          color: const Color(0xFF2d2d2d),
+          color: Theme.of(context).colorScheme.surface,
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             leading: Icon(

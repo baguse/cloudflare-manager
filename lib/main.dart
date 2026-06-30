@@ -93,8 +93,28 @@ class _CloseDialogIntent extends Intent {
   const _CloseDialogIntent();
 }
 
-class CloudflareManagerApp extends StatelessWidget {
+class CloudflareManagerApp extends StatefulWidget {
   const CloudflareManagerApp({super.key});
+
+  @override
+  State<CloudflareManagerApp> createState() => _CloudflareManagerAppState();
+}
+
+class _CloudflareManagerAppState extends State<CloudflareManagerApp> {
+  bool _isDarkMode = true;
+
+  @override
+  void initState() {
+    super.initState();
+    AppStorage.instance.read(key: 'theme_mode').then((v) {
+      if (mounted) setState(() => _isDarkMode = v != 'light');
+    });
+  }
+
+  void _toggleTheme() {
+    setState(() => _isDarkMode = !_isDarkMode);
+    AppStorage.instance.write(key: 'theme_mode', value: _isDarkMode ? 'dark' : 'light');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,7 +164,8 @@ class CloudflareManagerApp extends StatelessWidget {
         child: MaterialApp(
           title: 'Cloudflare Tunnel Manager',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(
+          themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+          darkTheme: ThemeData(
             brightness: Brightness.dark,
             scaffoldBackgroundColor: const Color(0xFF0F172A),
             colorScheme: const ColorScheme.dark(
@@ -158,15 +179,48 @@ class CloudflareManagerApp extends StatelessWidget {
             ),
             useMaterial3: true,
           ),
-          home: const DashboardScreen(),
+          theme: ThemeData(
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFFE07000),
+              surface: Color(0xFFFFFFFF),
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              foregroundColor: Colors.black87,
+            ),
+            cardTheme: const CardThemeData(
+              color: Colors.white,
+              elevation: 4,
+            ),
+            useMaterial3: true,
+          ),
+          home: DashboardScreen(toggleTheme: _toggleTheme, isDarkMode: _isDarkMode),
         ),
       ),
     );
   }
 }
 
+Color _cardBg(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF1E293B) : Colors.white;
+
+Color _panelBg(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF0F172A) : const Color(0xFFF5F5F5);
+
+Color _borderColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF334155) : const Color(0xFFE0E0E0);
+
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback? toggleTheme;
+  final bool isDarkMode;
+
+  const DashboardScreen({super.key, this.toggleTheme, this.isDarkMode = true});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -757,7 +811,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: _cardBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Row(
           children: [
@@ -1138,7 +1192,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
   Widget _buildSidebar({required bool isWide}) {
     return Material(
-      color: const Color(0xFF1E293B),
+      color: _cardBg(context),
       child: SizedBox(
         width: isWide ? 250 : 60,
         child: isWide ? _buildWideSidebar() : _buildNarrowSidebar(),
@@ -1159,8 +1213,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           leading: const Icon(Icons.dashboard, color: Color(0xFFF6821F)),
           title: const Text('Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
           selected: true,
-          tileColor: const Color(0xFF1E293B),
-          selectedTileColor: const Color(0xFF0F172A),
+          tileColor: _cardBg(context),
+          selectedTileColor: _panelBg(context),
           onTap: () {},
         ),
         ListTile(
@@ -1182,6 +1236,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           leading: const Icon(Icons.backup, color: Colors.grey),
           title: const Text('Backup & Restore', style: TextStyle(color: Colors.grey)),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
+        ),
+        ListTile(
+          leading: Icon(
+            widget.isDarkMode ? Icons.dark_mode : Icons.light_mode,
+            color: const Color(0xFFF6821F),
+          ),
+          title: Text(
+            widget.isDarkMode ? 'Dark Theme' : 'Light Theme',
+            style: const TextStyle(color: Colors.grey),
+          ),
+          onTap: widget.toggleTheme,
         ),
         ListTile(
           leading: const Icon(Icons.settings, color: Colors.grey),
@@ -1311,7 +1376,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: active ? const Color(0xFF0F172A) : null,
+            color: active ? _panelBg(context) : null,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, size: 20, color: active ? activeColor : Colors.grey),
@@ -1394,9 +1459,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       child: Column(
         children: [
           if (_isLoadingPorts)
-            const LinearProgressIndicator(
+            LinearProgressIndicator(
               minHeight: 2,
-              backgroundColor: Color(0xFF0F172A),
+              backgroundColor: _panelBg(context),
               color: Color(0xFFF6821F),
             ),
           Expanded(
@@ -1409,7 +1474,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   )
                 : ListView.separated(
                     itemCount: filteredPorts.length,
-                    separatorBuilder: (context, index) => const Divider(color: Color(0xFF334155), height: 1),
+                    separatorBuilder: (context, index) => Divider(color: _borderColor(context), height: 1),
                     itemBuilder: (context, index) => _buildPortItem(filteredPorts[index]),
                   ),
           ),
@@ -1444,9 +1509,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       child: Column(
         children: [
           if (_isLoadingRemoteTunnels)
-            const LinearProgressIndicator(
+            LinearProgressIndicator(
               minHeight: 2,
-              backgroundColor: Color(0xFF0F172A),
+              backgroundColor: _panelBg(context),
               color: Color(0xFFF6821F),
             ),
           _buildTunnelTagFilter(),
@@ -1469,7 +1534,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
   Widget _buildCardPanel({required String title, required IconData icon, required Widget child, Widget? action, TextEditingController? searchController}) {
     return Card(
-      color: const Color(0xFF1E293B),
+      color: _cardBg(context),
       elevation: 8,
       shadowColor: Colors.black45,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1496,7 +1561,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                           prefixIcon: const Icon(Icons.search, size: 18, color: Colors.grey),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                           filled: true,
-                          fillColor: const Color(0xFF0F172A),
+                          fillColor: _panelBg(context),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                         ),
                         style: const TextStyle(fontSize: 13),
@@ -1512,7 +1577,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0xFF334155)),
+          Divider(height: 1, color: _borderColor(context)),
           Expanded(child: child),
         ],
       ),
@@ -1528,7 +1593,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFF334155), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: _borderColor(context), borderRadius: BorderRadius.circular(8)),
             child: const Icon(Icons.lan, size: 18, color: Colors.white70),
           ),
           const SizedBox(width: 16),
@@ -1579,7 +1644,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 const SizedBox(height: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(4)),
+                  decoration: BoxDecoration(color: _panelBg(context), borderRadius: BorderRadius.circular(4)),
                   child: Text(portInfo.processName, style: const TextStyle(fontSize: 10, color: Colors.grey)),
                 ),
               ],
@@ -1603,7 +1668,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFF6821F),
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: const Color(0xFF334155),
+                  disabledBackgroundColor: _borderColor(context),
                   disabledForegroundColor: Colors.grey,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
@@ -1632,7 +1697,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             return false;
           }).toList();
     return Card(
-      color: const Color(0xFF1E293B),
+      color: _cardBg(context),
       elevation: 8,
       shadowColor: Colors.black45,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1663,7 +1728,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F172A),
+                            color: _panelBg(context),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -1683,7 +1748,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                               prefixIcon: const Icon(Icons.search, size: 14, color: Colors.grey),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                               filled: true,
-                              fillColor: const Color(0xFF0F172A),
+                              fillColor: _panelBg(context),
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide.none),
                               isDense: true,
                             ),
@@ -1716,7 +1781,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               );
             },
           ),
-          const Divider(height: 1, color: Color(0xFF334155)),
+          Divider(height: 1, color: _borderColor(context)),
           Expanded(
             child: requests.isEmpty
                 ? const Center(
@@ -1731,7 +1796,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                       )
                     : ListView.separated(
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 1),
+                        separatorBuilder: (_, __) => Divider(color: _borderColor(context), height: 1),
                         itemBuilder: (context, i) => _buildCapturedRequestRow(filtered[filtered.length - 1 - i]),
                   ),
           ),
@@ -1840,9 +1905,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
+                    color: _panelBg(context),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: const Color(0xFF334155)),
+                    border: Border.all(color: _borderColor(context)),
                   ),
                   child: Text(
                     contentType,
@@ -1915,7 +1980,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: _panelBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           width: 700,
@@ -1946,7 +2011,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
                 ],
               ),
-              const Divider(color: Color(0xFF334155)),
+              Divider(color: _borderColor(context)),
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
@@ -1994,7 +2059,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: _panelBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           width: 700,
@@ -2038,7 +2103,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
                 ],
               ),
-              const Divider(color: Color(0xFF334155)),
+              Divider(color: _borderColor(context)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2049,7 +2114,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
+                        color: _cardBg(context),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Row(
@@ -2068,7 +2133,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                           ? const Center(child: Text('No frames captured yet', style: TextStyle(color: Colors.grey, fontSize: 12)))
                           : ListView.separated(
                               itemCount: r.wsFrames!.length,
-                              separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 1),
+                              separatorBuilder: (_, __) => Divider(color: _borderColor(context), height: 1),
                               itemBuilder: (context, i) => _buildWsFrameRow(r.wsFrames![i]),
                             ),
                     ),
@@ -2152,7 +2217,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           width: double.infinity,
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
+            color: _cardBg(context),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text(value, style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace')),
@@ -2215,7 +2280,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
+              color: _cardBg(context),
               borderRadius: BorderRadius.circular(6),
             ),
             child: ClipRRect(
@@ -2236,7 +2301,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               width: double.infinity,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
+                color: _panelBg(context),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -2252,7 +2317,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               width: double.infinity,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: _cardBg(context),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: SingleChildScrollView(
@@ -2288,7 +2353,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           width: double.infinity,
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
+            color: _cardBg(context),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Column(
@@ -2533,7 +2598,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 fontSize: 12,
                 color: _selectedTunnelTag == null || _selectedTunnelTag!.isEmpty ? Colors.white : Colors.grey,
               ),
-              backgroundColor: const Color(0xFF1E293B),
+              backgroundColor: _cardBg(context),
               side: BorderSide.none,
               padding: const EdgeInsets.symmetric(horizontal: 4),
               visualDensity: VisualDensity.compact,
@@ -2550,7 +2615,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 onSelected: (_) => setState(() => _selectedTunnelTag = isSelected ? null : tag),
                 selectedColor: color,
                 checkmarkColor: Colors.white,
-                backgroundColor: const Color(0xFF1E293B),
+                backgroundColor: _cardBg(context),
                 side: BorderSide.none,
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 visualDensity: VisualDensity.compact,
@@ -2598,7 +2663,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
+        color: _panelBg(context),
         border: Border.all(color: Colors.grey.withOpacity(0.5)),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -2736,7 +2801,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         ? Colors.green.withOpacity(0.5)
         : isConnected
             ? Colors.blue.withOpacity(0.4)
-            : const Color(0xFF334155);
+            : _borderColor(context);
     final Color iconColor = isLocal
         ? Colors.green
         : isConnected
@@ -2762,7 +2827,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
+        color: _panelBg(context),
         border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -3056,7 +3121,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (dialogCtx) => Dialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: _panelBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           width: 450,
@@ -3088,7 +3153,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   hintText: 'e.g. staging env, behind SSO, owned by @alice',
                   hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
                   filled: true,
-                  fillColor: const Color(0xFF1E293B),
+                  fillColor: _cardBg(context),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                   contentPadding: const EdgeInsets.all(12),
                 ),
@@ -3143,10 +3208,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: isSelected ? _tagColor(tag).withOpacity(0.2) : const Color(0xFF1E293B),
+                            color: isSelected ? _tagColor(tag).withOpacity(0.2) : _cardBg(context),
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: isSelected ? _tagColor(tag).withOpacity(0.5) : const Color(0xFF334155),
+                              color: isSelected ? _tagColor(tag).withOpacity(0.5) : _borderColor(context),
                             ),
                           ),
                           child: Text(
@@ -3191,7 +3256,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                                 hintText: atMax ? 'Max 5 tags reached' : 'Select or type custom…',
                                 hintStyle: TextStyle(fontSize: 11, color: atMax ? Colors.redAccent.withOpacity(0.6) : Colors.grey),
                                 filled: true,
-                                fillColor: const Color(0xFF1E293B),
+                                fillColor: _cardBg(context),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                 isDense: true,
@@ -3254,7 +3319,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       context: context,
       builder: (context) {
         return Dialog(
-          backgroundColor: const Color(0xFF1E293B),
+          backgroundColor: _cardBg(context),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Container(
             width: 340,
@@ -3289,13 +3354,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                     version: QrVersions.auto,
                     size: 240,
                     backgroundColor: Colors.white,
-                    eyeStyle: const QrEyeStyle(
+                    eyeStyle: QrEyeStyle(
                       eyeShape: QrEyeShape.square,
-                      color: Color(0xFF0F172A),
+                      color: _panelBg(context),
                     ),
-                    dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleStyle: QrDataModuleStyle(
                       dataModuleShape: QrDataModuleShape.square,
-                      color: Color(0xFF0F172A),
+                      color: _panelBg(context),
                     ),
                     errorStateBuilder: (context, err) => Container(
                       width: 240,
@@ -3371,7 +3436,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           builder: (context, setDialogState) {
             final serviceEnabled = _tunnelConfigs[tunnelId]?['serviceEnabled'] == 'true';
             return Dialog(
-              backgroundColor: const Color(0xFF0F172A),
+              backgroundColor: _panelBg(context),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Container(
                 width: 360,
@@ -3436,7 +3501,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: _panelBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           width: 360,
@@ -3482,7 +3547,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           }).catchError((_) {});
         }
         return Dialog(
-          backgroundColor: const Color(0xFF0F172A),
+          backgroundColor: _panelBg(context),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Container(
             width: 600,
@@ -3500,7 +3565,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                     IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
                   ],
                 ),
-                const Divider(color: Color(0xFF334155)),
+                Divider(color: _borderColor(context)),
                 Expanded(
                   child: ValueListenableBuilder<List<String>>(
                     valueListenable: logsNotifier,
@@ -3537,7 +3602,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: _panelBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           width: 600,
@@ -3555,7 +3620,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                   IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
                 ],
               ),
-              const Divider(color: Color(0xFF334155)),
+              Divider(color: _borderColor(context)),
               Expanded(
                 child: ValueListenableBuilder<List<String>>(
                   valueListenable: logsNotifier,
@@ -3581,7 +3646,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: _cardBg(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Row(
           children: [
@@ -3679,7 +3744,7 @@ class _InspectorConfigDialogState extends State<InspectorConfigDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF1E293B),
+      backgroundColor: _cardBg(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Row(
         children: [
@@ -3700,10 +3765,10 @@ class _InspectorConfigDialogState extends State<InspectorConfigDialog> {
           TextField(
             controller: _listenController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+               decoration: InputDecoration(
               labelText: 'Inspector listen port',
               filled: true,
-              fillColor: Color(0xFF0F172A),
+              fillColor: _panelBg(context),
               border: OutlineInputBorder(borderSide: BorderSide.none),
             ),
           ),
@@ -3711,10 +3776,10 @@ class _InspectorConfigDialogState extends State<InspectorConfigDialog> {
           TextField(
             controller: _targetController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+               decoration: InputDecoration(
               labelText: 'Upstream port (your real service)',
               filled: true,
-              fillColor: Color(0xFF0F172A),
+              fillColor: _panelBg(context),
               border: OutlineInputBorder(borderSide: BorderSide.none),
             ),
           ),
@@ -3722,7 +3787,7 @@ class _InspectorConfigDialogState extends State<InspectorConfigDialog> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
+              color: _panelBg(context),
               borderRadius: BorderRadius.circular(6),
             ),
             child: const Text(
@@ -3800,7 +3865,7 @@ class _BindPortDialogState extends State<BindPortDialog> {
     final hostname = cfg?['hostname'] ?? widget.tunnelId.substring(0, 8);
     final fullDomain = hostname.contains('.') ? hostname : 'https://$hostname';
     return AlertDialog(
-      backgroundColor: const Color(0xFF1E293B),
+      backgroundColor: _cardBg(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
@@ -3832,8 +3897,8 @@ class _BindPortDialogState extends State<BindPortDialog> {
                   label: Text('${p.port}  ·  ${p.processName}', style: const TextStyle(fontSize: 11)),
                   selected: selected,
                   selectedColor: const Color(0xFFF6821F).withOpacity(0.3),
-                  backgroundColor: const Color(0xFF0F172A),
-                  side: BorderSide(color: selected ? const Color(0xFFF6821F) : const Color(0xFF334155)),
+                  backgroundColor: _panelBg(context),
+                  side: BorderSide(color: selected ? const Color(0xFFF6821F) : _borderColor(context)),
                   onSelected: (_) {
                     setState(() {
                       _selectedPort = p.port;
@@ -3848,10 +3913,10 @@ class _BindPortDialogState extends State<BindPortDialog> {
           TextField(
             controller: _portController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+               decoration: InputDecoration(
               labelText: 'Port',
               filled: true,
-              fillColor: Color(0xFF0F172A),
+              fillColor: _panelBg(context),
               border: OutlineInputBorder(borderSide: BorderSide.none),
             ),
             onChanged: (v) {
@@ -3908,7 +3973,7 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF1E293B),
+      backgroundColor: _cardBg(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Text('Bind Port ${widget.localPort} to Domain', style: const TextStyle(fontWeight: FontWeight.bold)),
       content: _isLoading
@@ -3924,7 +3989,7 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
                     decoration: InputDecoration(
                       labelText: 'Subdomain (e.g. app)',
                       filled: true,
-                      fillColor: const Color(0xFF0F172A),
+                      fillColor: _panelBg(context),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                     ),
                   ),
@@ -3934,10 +3999,10 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
                     decoration: InputDecoration(
                       labelText: 'Zone / Domain',
                       filled: true,
-                      fillColor: const Color(0xFF0F172A),
+                      fillColor: _panelBg(context),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                     ),
-                    dropdownColor: const Color(0xFF1E293B),
+                    dropdownColor: _cardBg(context),
                     items: _zones.map((zone) {
                       return DropdownMenuItem<Map<String, dynamic>>(
                         value: zone,

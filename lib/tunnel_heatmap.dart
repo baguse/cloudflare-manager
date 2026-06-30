@@ -20,17 +20,18 @@ class TunnelHeatmap extends StatelessWidget {
       final date = _dateKey(now.subtract(Duration(days: d)));
       final count = dayCounts[date] ?? 0;
       final intensity = maxCount > 0 ? count / maxCount : 0.0;
-      final color = _heatColor(intensity, date == today ? 0.25 : 0.0);
+      final color = _heatColor(intensity, date == today ? 0.25 : 0.0, context);
 
       cells.add(Tooltip(
         message: '$date — $count requests',
         child: Container(
-          width: 12,
-          height: 12,
+          width: 12, height: 12,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(2),
-            border: date == today ? Border.all(color: Colors.white.withOpacity(0.3), width: 1) : null,
+            border: date == today
+                ? Border.all(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3), width: 1)
+                : null,
           ),
         ),
       ));
@@ -63,7 +64,7 @@ class TunnelHeatmap extends StatelessWidget {
           children: [
             const Text('Less', style: TextStyle(fontSize: 9, color: Colors.grey)),
             const SizedBox(width: 4),
-            _legendSwatch(),
+            _legendSwatch(context),
             const SizedBox(width: 4),
             const Text('More', style: TextStyle(fontSize: 9, color: Colors.grey)),
           ],
@@ -72,27 +73,26 @@ class TunnelHeatmap extends StatelessWidget {
     );
   }
 
-  Widget _legendSwatch() {
+  Widget _legendSwatch(BuildContext context) {
     const steps = [0.0, 0.25, 0.5, 0.75, 1.0];
     return Row(
       children: steps.map((i) => Container(
-        width: 10,
-        height: 10,
+        width: 10, height: 10,
         decoration: BoxDecoration(
-          color: _heatColor(i, 0),
+          color: _heatColor(i, 0, context),
           borderRadius: BorderRadius.circular(2),
         ),
       )).toList(),
     );
   }
 
-  Color _heatColor(double intensity, double todayBonus) {
-    final base = Color.lerp(
-      const Color(0xFF1E293B),
-      const Color(0xFFF6821F),
+  Color _heatColor(double intensity, double todayBonus, BuildContext context) {
+    final emptyColor = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF1E293B) : const Color(0xFFE8E8E8);
+    final base = Color.lerp(emptyColor, const Color(0xFFF6821F),
       (intensity * 0.8 + todayBonus).clamp(0, 1),
     )!;
-    if (intensity == 0) return const Color(0xFF1E293B);
+    if (intensity == 0) return emptyColor;
     return base;
   }
 

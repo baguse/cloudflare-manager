@@ -69,9 +69,9 @@ class _WebhookScreenState extends State<WebhookScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1a1a1a),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF2d2d2d),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Webhook Configuration'),
         actions: [
           IconButton(
@@ -125,7 +125,7 @@ class _WebhookScreenState extends State<WebhookScreen> {
       itemBuilder: (context, index) {
         final webhook = _webhooks[index];
         return Card(
-          color: const Color(0xFF2d2d2d),
+          color: Theme.of(context).colorScheme.surface,
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
             leading: Icon(
@@ -376,9 +376,9 @@ class _WebhookEditorScreenState extends State<WebhookEditorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1a1a1a),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF2d2d2d),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: Text(widget.webhook == null ? 'New Webhook' : 'Edit Webhook'),
         actions: [
           TextButton.icon(
