@@ -158,7 +158,7 @@ class HttpInspector {
         }
       });
 
-      final reqTee = await _teeStream(req, forward);
+      final reqTee = await _teeStream(req, forward).timeout(const Duration(seconds: 15));
       captured.requestBody = reqTee.body;
       captured.requestBodySize = reqTee.totalBytes > 0 ? reqTee.totalBytes : null;
 
@@ -174,7 +174,7 @@ class HttpInspector {
         }
       });
 
-      final respTee = await _teeStream(response, req.response);
+      final respTee = await _teeStream(response, req.response).timeout(const Duration(seconds: 15));
       captured.responseBody = respTee.body;
       captured.responseBodySize = respTee.totalBytes > 0 ? respTee.totalBytes : null;
       captured.latencyMs = DateTime.now().difference(start).inMilliseconds;
