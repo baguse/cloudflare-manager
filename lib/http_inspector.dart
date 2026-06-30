@@ -96,17 +96,22 @@ class HttpInspector {
         listenPort,
         v6Only: false,
       );
-    } catch (e) {
-      _server = await HttpServer.bind(InternetAddress.anyIPv4, listenPort);
+    } catch (_) {
+      try {
+        _server = await HttpServer.bind(InternetAddress.anyIPv4, listenPort);
+      } catch (e) {
+        throw Exception('Failed to bind to port $listenPort: $e');
+      }
     }
-    _server!.listen(_handle, onError: (e) {
-    });
+    _server!.listen(_handle, onError: (e) {});
   }
 
   Future<void> stop() async {
     await _server?.close(force: true);
     _server = null;
-    await _requestsController.close();
+    if (!_requestsController.isClosed) {
+      await _requestsController.close();
+    }
   }
 
   bool get isRunning => _server != null;
