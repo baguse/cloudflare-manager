@@ -297,6 +297,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   void dispose() {
     _refreshTimer?.cancel();
     _connectivityTimer?.cancel();
+    RateAlertService.instance.dispose();
     _watcherSub?.cancel();
     _watcher.dispose();
     _inspectorSub?.cancel();
