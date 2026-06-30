@@ -124,6 +124,7 @@ class TunnelWatcher {
   }
 
   Future<void> _check(WatchedTunnel t) async {
+    if (!_watched.containsKey(t.tunnelId)) return;
     final alive = await _isAlive(t.currentPid);
     if (alive) {
       if (t.status == TunnelWatcherStatus.reconnecting || t.retryCount > 0) {
