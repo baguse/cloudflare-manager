@@ -216,6 +216,12 @@ Color _borderColor(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF334155) : const Color(0xFFE0E0E0);
 
+Color _textPrimary(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? Colors.white : Colors.black87;
+
+enum _AppPage { dashboard, dnsEditor, webhooks, rateAlerts, backupRestore, settings }
+
 class DashboardScreen extends StatefulWidget {
   final VoidCallback? toggleTheme;
   final bool isDarkMode;
@@ -227,6 +233,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
+  _AppPage _currentPage = _AppPage.dashboard;
   List<OpenPort> _openPorts = [];
   List<ActiveTunnel> _activeTunnels = [];
   List<Map<String, dynamic>> _remoteTunnels = [];
@@ -1182,7 +1189,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           return Row(
             children: [
               _buildSidebar(isWide: isWide),
-              Expanded(child: _buildMainContent(isWide: isWide)),
+              Expanded(child: _currentPage == _AppPage.dashboard
+                  ? _buildMainContent(isWide: isWide)
+                  : _buildPageContent()),
             ],
           );
         },
@@ -1195,6 +1204,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       color: _cardBg(context),
       child: SizedBox(
         width: isWide ? 250 : 60,
+        height: double.infinity,
         child: isWide ? _buildWideSidebar() : _buildNarrowSidebar(),
       ),
     );
@@ -1210,51 +1220,52 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         const Text('Cloudflare\nManager', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.2)),
         const SizedBox(height: 40),
         ListTile(
-          leading: const Icon(Icons.dashboard, color: Color(0xFFF6821F)),
-          title: const Text('Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
-          selected: true,
+          leading: Icon(Icons.dashboard, color: _currentPage == _AppPage.dashboard ? const Color(0xFFF6821F) : Colors.grey),
+          title: Text('Dashboard', style: TextStyle(color: _currentPage == _AppPage.dashboard ? _textPrimary(context) : Colors.grey, fontWeight: _currentPage == _AppPage.dashboard ? FontWeight.bold : FontWeight.normal)),
+          selected: _currentPage == _AppPage.dashboard,
           tileColor: _cardBg(context),
           selectedTileColor: _panelBg(context),
-          onTap: () {},
+          onTap: () => setState(() => _currentPage = _AppPage.dashboard),
         ),
         ListTile(
-          leading: const Icon(Icons.dns, color: Colors.grey),
-          title: const Text('DNS Editor', style: TextStyle(color: Colors.grey)),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen())),
+          selected: _currentPage == _AppPage.dnsEditor,
+          tileColor: _cardBg(context),
+          selectedTileColor: _panelBg(context),
+          leading: Icon(Icons.dns, color: _currentPage == _AppPage.dnsEditor ? const Color(0xFFF6821F) : Colors.grey),
+          title: Text('DNS Editor', style: TextStyle(color: _currentPage == _AppPage.dnsEditor ? _textPrimary(context) : Colors.grey)),
+          onTap: () => setState(() => _currentPage = _AppPage.dnsEditor),
         ),
         ListTile(
-          leading: const Icon(Icons.webhook, color: Colors.grey),
-          title: const Text('Webhooks', style: TextStyle(color: Colors.grey)),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen())),
+          selected: _currentPage == _AppPage.webhooks,
+          tileColor: _cardBg(context),
+          selectedTileColor: _panelBg(context),
+          leading: Icon(Icons.webhook, color: _currentPage == _AppPage.webhooks ? const Color(0xFFF6821F) : Colors.grey),
+          title: Text('Webhooks', style: TextStyle(color: _currentPage == _AppPage.webhooks ? _textPrimary(context) : Colors.grey)),
+          onTap: () => setState(() => _currentPage = _AppPage.webhooks),
         ),
         ListTile(
-          leading: const Icon(Icons.speed, color: Colors.grey),
-          title: const Text('Rate Alerts', style: TextStyle(color: Colors.grey)),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen())),
+          selected: _currentPage == _AppPage.rateAlerts,
+          tileColor: _cardBg(context),
+          selectedTileColor: _panelBg(context),
+          leading: Icon(Icons.speed, color: _currentPage == _AppPage.rateAlerts ? const Color(0xFFF6821F) : Colors.grey),
+          title: Text('Rate Alerts', style: TextStyle(color: _currentPage == _AppPage.rateAlerts ? _textPrimary(context) : Colors.grey)),
+          onTap: () => setState(() => _currentPage = _AppPage.rateAlerts),
         ),
         ListTile(
-          leading: const Icon(Icons.backup, color: Colors.grey),
-          title: const Text('Backup & Restore', style: TextStyle(color: Colors.grey)),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
+          selected: _currentPage == _AppPage.backupRestore,
+          tileColor: _cardBg(context),
+          selectedTileColor: _panelBg(context),
+          leading: Icon(Icons.backup, color: _currentPage == _AppPage.backupRestore ? const Color(0xFFF6821F) : Colors.grey),
+          title: Text('Backup & Restore', style: TextStyle(color: _currentPage == _AppPage.backupRestore ? _textPrimary(context) : Colors.grey)),
+          onTap: () => setState(() => _currentPage = _AppPage.backupRestore),
         ),
         ListTile(
-          leading: Icon(
-            widget.isDarkMode ? Icons.dark_mode : Icons.light_mode,
-            color: const Color(0xFFF6821F),
-          ),
-          title: Text(
-            widget.isDarkMode ? 'Dark Theme' : 'Light Theme',
-            style: const TextStyle(color: Colors.grey),
-          ),
-          onTap: widget.toggleTheme,
-        ),
-        ListTile(
-          leading: const Icon(Icons.settings, color: Colors.grey),
-          title: const Text('Settings', style: TextStyle(color: Colors.grey)),
-          onTap: () async {
-            await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-            _loadPortRange();
-          },
+          selected: _currentPage == _AppPage.settings,
+          tileColor: _cardBg(context),
+          selectedTileColor: _panelBg(context),
+          leading: Icon(Icons.settings, color: _currentPage == _AppPage.settings ? const Color(0xFFF6821F) : Colors.grey),
+          title: Text('Settings', style: TextStyle(color: _currentPage == _AppPage.settings ? _textPrimary(context) : Colors.grey)),
+          onTap: () { setState(() => _currentPage = _AppPage.settings); _loadPortRange(); },
         ),
         ListTile(
           leading: Icon(
@@ -1330,20 +1341,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         const SizedBox(height: 16),
         const Icon(Icons.cloud_circle, size: 32, color: Color(0xFFF6821F)),
         const SizedBox(height: 24),
-        _sidebarIcon(Icons.dashboard, 'Dashboard', active: true),
+        _sidebarIcon(Icons.dashboard, 'Dashboard', active: _currentPage == _AppPage.dashboard, onTap: () => setState(() => _currentPage = _AppPage.dashboard)),
         const SizedBox(height: 8),
-        _sidebarIcon(Icons.dns, 'DNS Editor', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DnsEditorScreen()))),
+        _sidebarIcon(Icons.dns, 'DNS Editor', onTap: () => setState(() => _currentPage = _AppPage.dnsEditor)),
         const SizedBox(height: 8),
-        _sidebarIcon(Icons.webhook, 'Webhooks', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen()))),
+        _sidebarIcon(Icons.webhook, 'Webhooks', onTap: () => setState(() => _currentPage = _AppPage.webhooks)),
         const SizedBox(height: 8),
-        _sidebarIcon(Icons.speed, 'Rate Alerts', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen()))),
+        _sidebarIcon(Icons.speed, 'Rate Alerts', onTap: () => setState(() => _currentPage = _AppPage.rateAlerts)),
         const SizedBox(height: 8),
-        _sidebarIcon(Icons.backup, 'Backup & Restore', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupRestoreScreen()))),
+        _sidebarIcon(Icons.backup, 'Backup & Restore', onTap: () => setState(() => _currentPage = _AppPage.backupRestore)),
         const SizedBox(height: 8),
-        _sidebarIcon(Icons.settings, 'Settings', onTap: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-          _loadPortRange();
-        }),
+        _sidebarIcon(Icons.settings, 'Settings', onTap: () { setState(() => _currentPage = _AppPage.settings); _loadPortRange(); }),
         const SizedBox(height: 8),
         _sidebarIcon(
           _watcher.isEnabled ? Icons.visibility : Icons.visibility_off,
@@ -1385,13 +1393,72 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     );
   }
 
+  Widget _buildPageContent() {
+    String title;
+    Widget child;
+    switch (_currentPage) {
+      case _AppPage.dnsEditor:
+        title = 'DNS Editor';
+        child = const DnsEditorScreen();
+        break;
+      case _AppPage.webhooks:
+        title = 'Webhooks';
+        child = const WebhookScreen();
+        break;
+      case _AppPage.rateAlerts:
+        title = 'Rate Alerts';
+        child = const RateAlertScreen();
+        break;
+      case _AppPage.backupRestore:
+        title = 'Backup & Restore';
+        child = const BackupRestoreScreen();
+        break;
+      case _AppPage.settings:
+        title = 'Settings';
+        child = SettingsScreen(onPortRangeChanged: _loadPortRange);
+        break;
+      case _AppPage.dashboard:
+        return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 16, 8),
+          child: Row(
+            children: [
+              Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              IconButton(
+                icon: Icon(widget.isDarkMode ? Icons.dark_mode : Icons.light_mode, color: const Color(0xFFF6821F)),
+                tooltip: 'Toggle Theme',
+                onPressed: widget.toggleTheme,
+              ),
+            ],
+          ),
+        ),
+        Expanded(child: child),
+      ],
+    );
+  }
+
   Widget _buildMainContent({required bool isWide}) {
     return Padding(
       padding: EdgeInsets.all(isWide ? 32.0 : 16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Overview', style: TextStyle(fontSize: isWide ? 28 : 22, fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              Text('Overview', style: TextStyle(fontSize: isWide ? 28 : 22, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              IconButton(
+                icon: Icon(widget.isDarkMode ? Icons.dark_mode : Icons.light_mode, color: const Color(0xFFF6821F)),
+                tooltip: 'Toggle Theme',
+                onPressed: widget.toggleTheme,
+              ),
+            ],
+          ),
           const SizedBox(height: 24),
           Expanded(
             child: isWide ? _buildWidePanels() : _buildNarrowPanels(),

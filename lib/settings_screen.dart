@@ -8,7 +8,8 @@ import 'daemon/cf_api_client.dart';
 import 'tray_service.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final VoidCallback? onPortRangeChanged;
+  const SettingsScreen({super.key, this.onPortRangeChanged});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -120,7 +121,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         );
-        Navigator.pop(context);
+        widget.onPortRangeChanged?.call();
       } else {
         messenger.showSnackBar(
           SnackBar(
