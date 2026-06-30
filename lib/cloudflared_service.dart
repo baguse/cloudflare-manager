@@ -495,6 +495,7 @@ class CloudflaredService {
   static Future<Process> startQuickTunnel(int localPort) async {
     return await Process.start(_executablePath, [
       'tunnel',
+      '--no-autoupdate',
       '--url',
       'http://localhost:$localPort'
     ]);
