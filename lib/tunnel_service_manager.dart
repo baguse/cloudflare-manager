@@ -295,7 +295,7 @@ class TunnelServiceManager {
     if (!File(socketPath).existsSync()) return;
     try {
       _log('[svc] _forceKillDaemon: socket still exists, force-killing...');
-      await Process.run('pkill', ['-f', 'cloudflare_manager.dart daemon start']);
+      await Process.run('pkill', ['-f', 'cloudflare_manager.*daemon.*start']);
       await Future.delayed(const Duration(milliseconds: 500));
       if (File(socketPath).existsSync()) {
         await File(socketPath).delete();
