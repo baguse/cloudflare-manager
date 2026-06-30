@@ -131,6 +131,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   final _passwordController = TextEditingController();
   bool _usePassword = false;
   bool _includeSecrets = false;
+  bool _showPassword = false;
 
   @override
   void dispose() {
@@ -602,7 +603,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                         Expanded(
                           child: TextField(
                             controller: _passwordController,
-                            obscureText: true,
+                            obscureText: !_showPassword,
                             decoration: InputDecoration(
                               hintText: 'Enter password',
                               filled: true,
@@ -610,7 +611,12 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                               border: const OutlineInputBorder(borderSide: BorderSide.none),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               isDense: true,
+                              suffixIcon: IconButton(
+                                icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility, size: 18),
+                                onPressed: () => setState(() => _showPassword = !_showPassword),
+                              ),
                             ),
+                            onChanged: (_) => setState(() {}),
                           ),
                         ),
                     ],
@@ -623,9 +629,14 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                         Checkbox(
                           value: _includeSecrets,
                           activeColor: const Color(0xFFF6821F),
-                          onChanged: (v) => setState(() => _includeSecrets = v ?? false),
+                          onChanged: _passwordController.text.trim().isEmpty
+                              ? null
+                              : (v) => setState(() => _includeSecrets = v ?? false),
                         ),
-                        const Text('Include credentials & secrets (encrypted)', style: TextStyle(fontSize: 12)),
+                        Text(
+                          'Include credentials & secrets (encrypted)',
+                          style: TextStyle(fontSize: 12, color: _passwordController.text.trim().isEmpty ? Colors.grey : null),
+                        ),
                       ],
                     ),
                   ],
