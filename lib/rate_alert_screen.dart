@@ -181,7 +181,14 @@ class _RateAlertEditorScreenState extends State<RateAlertEditorScreen> {
     _thresholdController = TextEditingController(text: alert?.thresholdPerHour.toString() ?? '10000');
     _selectedWebhookId = alert?.webhookId;
     _enabled = alert?.enabled ?? true;
-    WebhookService.instance.loadWebhooks();
+    WebhookService.instance.loadWebhooks().then((_) {
+      if (!mounted) return;
+      final exists = _selectedWebhookId == null ||
+          WebhookService.instance.webhooks.any((w) => w.id == _selectedWebhookId);
+      if (!exists) {
+        setState(() => _selectedWebhookId = null);
+      }
+    });
   }
 
   @override
@@ -219,6 +226,9 @@ class _RateAlertEditorScreenState extends State<RateAlertEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final webhooks = WebhookService.instance.webhooks;
+    final dropdownValue = (_selectedWebhookId != null && webhooks.any((w) => w.id == _selectedWebhookId))
+        ? _selectedWebhookId
+        : null;
 
     return Scaffold(
       backgroundColor: const Color(0xFF1a1a1a),
@@ -262,7 +272,7 @@ class _RateAlertEditorScreenState extends State<RateAlertEditorScreen> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String?>(
-              value: _selectedWebhookId,
+              value: dropdownValue,
               decoration: const InputDecoration(labelText: 'Notify via Webhook', border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('None')),
