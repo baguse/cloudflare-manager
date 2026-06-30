@@ -1,9 +1,76 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:crypto/crypto.dart';
 import 'webhook_service.dart';
 import 'rate_alert_service.dart';
+
+const _kAutoBackupDir = '.cloudflared/backups';
+const _kMaxAutoBackups = 10;
+
+String? _homeDir() => Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+
+Future<void> createAutoBackup() async {
+  final home = _homeDir();
+  if (home == null) return;
+  final src = Directory('$home/.cloudflared');
+  if (!await src.exists()) return;
+  final dstDir = Directory('$home/$_kAutoBackupDir');
+  if (!await dstDir.exists()) await dstDir.create(recursive: true);
+
+  final backup = <String, dynamic>{
+    'version': 1,
+    'timestamp': DateTime.now().toIso8601String(),
+    'auto': true,
+  };
+
+  for (final name in ['app-settings.json', 'webhooks.json', 'app-tunnels.json', 'daemon.json', 'rate-alerts.json']) {
+    final f = File('${src.path}/$name');
+    if (await f.exists()) {
+      backup[name.replaceAll('.json', '').replaceAll('-', '_')] = json.decode(await f.readAsString());
+    }
+  }
+
+  final content = json.encode(backup);
+  final checksum = sha256.convert(utf8.encode(content)).toString();
+  final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+  await File('${dstDir.path}/auto-$stamp.json').writeAsString(
+    const JsonEncoder.withIndent('  ').convert({...backup, '_checksum': checksum}),
+  );
+
+  // Rotate old backups
+  final files = await dstDir.list().toList();
+  final backups = files.whereType<File>().where((f) => f.path.endsWith('.json')).toList()
+    ..sort((a, b) => b.path.compareTo(a.path));
+  for (var i = _kMaxAutoBackups; i < backups.length; i++) {
+    try { await backups[i].delete(); } catch (_) {}
+  }
+}
+
+Future<List<Map<String, dynamic>>> listAutoBackups() async {
+  final home = _homeDir();
+  if (home == null) return [];
+  final dir = Directory('$home/$_kAutoBackupDir');
+  if (!await dir.exists()) return [];
+  final files = await dir.list().toList();
+  final result = <Map<String, dynamic>>[];
+  for (final entity in files.whereType<File>().where((f) => f.path.endsWith('.json'))) {
+    try {
+      final data = json.decode(await entity.readAsString());
+      if (data is Map && data['auto'] == true) {
+        result.add({
+          'path': entity.path,
+          'timestamp': data['timestamp'] ?? '',
+          'checksum': data['_checksum'] ?? '',
+        });
+      }
+    } catch (_) {}
+  }
+  result.sort((a, b) => (b['timestamp'] as String).compareTo(a['timestamp'] as String));
+  return result.take(_kMaxAutoBackups).toList();
+}
 
 Color _cardBg(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
@@ -12,6 +79,40 @@ Color _cardBg(BuildContext context) =>
 Color _panelBg(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF0F172A) : const Color(0xFFF5F5F5);
+
+const _encryptMagic = 'CFENCv1';
+
+Uint8List _deriveKey(String password) {
+  return Uint8List.fromList(sha256.convert(utf8.encode(password)).bytes);
+}
+
+String _encrypt(String plain, String password) {
+  final key = _deriveKey(password);
+  final bytes = utf8.encode(plain);
+  final enc = Uint8List(bytes.length);
+  for (int i = 0; i < bytes.length; i++) {
+    enc[i] = bytes[i] ^ key[i % key.length];
+  }
+  return _encryptMagic + base64Encode(enc);
+}
+
+String? _decrypt(String data, String password) {
+  if (!data.startsWith(_encryptMagic)) return data; // not encrypted
+  final encoded = data.substring(_encryptMagic.length);
+  final enc = base64Decode(encoded);
+  final key = _deriveKey(password);
+  final dec = Uint8List(enc.length);
+  for (int i = 0; i < enc.length; i++) {
+    dec[i] = enc[i] ^ key[i % key.length];
+  }
+  try {
+    final text = utf8.decode(dec, allowMalformed: true);
+    json.decode(text); // validate JSON
+    return text;
+  } catch (_) {
+    return null; // wrong password or corrupt
+  }
+}
 
 class BackupRestoreScreen extends StatefulWidget {
   const BackupRestoreScreen({super.key});
@@ -27,6 +128,15 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   bool _backupDaemonConfig = true;
   bool _backupRateAlerts = true;
   bool _loading = false;
+  final _passwordController = TextEditingController();
+  bool _usePassword = false;
+  bool _includeSecrets = false;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   static String get _configDir {
     final home = Platform.environment['HOME'] ?? '/tmp';
@@ -58,8 +168,30 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         final f = File('$_configDir/rate-alerts.json');
         if (await f.exists()) backup['rate_alerts'] = json.decode(await f.readAsString());
       }
+      if (_includeSecrets) {
+        final tunnelDir = Directory(_configDir);
+        final tunnelFiles = (await tunnelDir.list().toList())
+            .whereType<File>()
+            .where((f) {
+              final name = f.path.split('/').last;
+              return name.endsWith('.json') &&
+                  !['app-settings.json', 'webhooks.json', 'app-tunnels.json', 'daemon.json', 'rate-alerts.json', 'app-inspector.json'].contains(name);
+            });
+        final creds = <String, dynamic>{};
+        for (final f in tunnelFiles) {
+          try {
+            creds[f.path.split('/').last] = json.decode(await f.readAsString());
+          } catch (_) {}
+        }
+        if (creds.isNotEmpty) backup['_credentials'] = creds;
+      }
 
-      final defaultName = 'cloudflare-manager-backup-${DateTime.now().toIso8601String().split('T').first}.json';
+      var content = const JsonEncoder.withIndent('  ').convert(backup);
+      if (_usePassword) {
+        content = _encrypt(content, _passwordController.text.trim());
+      }
+
+      final defaultName = 'cloudflare-manager-backup${_usePassword ? '-encrypted' : ''}-${DateTime.now().toIso8601String().split('T').first}.json';
       String? outputPath = await _pickFilePath(
         defaultName: defaultName,
         title: 'Save backup',
@@ -72,8 +204,13 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         return;
       }
 
-      await File(outputPath).writeAsString(const JsonEncoder.withIndent('  ').convert(backup));
-      _showSnack('Backup saved to $outputPath', Colors.green);
+      await File(outputPath).writeAsString(content);
+      _showSnack('Backup saved to $outputPath${_usePassword ? " (encrypted)" : ""}', Colors.green);
+      setState(() {
+        _usePassword = false;
+        _includeSecrets = false;
+        _passwordController.clear();
+      });
     } catch (e) {
       _showSnack('Backup failed: $e', Colors.redAccent);
     }
@@ -89,16 +226,33 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
 
     if (filePath == null || filePath.isEmpty) return;
 
+    final rawData = await File(filePath).readAsString();
+
     Map<String, dynamic>? data;
-    try {
-      data = json.decode(await File(filePath).readAsString());
-      if (data is! Map<String, dynamic>) {
+    if (rawData.startsWith(_encryptMagic)) {
+      final pw = await _promptPassword('This backup is encrypted. Enter password:');
+      if (pw == null || pw.isEmpty) {
+        _showSnack('Password required for encrypted backup', Colors.redAccent);
+        return;
+      }
+      final decrypted = _decrypt(rawData, pw);
+      if (decrypted == null) {
+        _showSnack('Wrong password or corrupt file', Colors.redAccent);
+        return;
+      }
+      try {
+        data = json.decode(decrypted) as Map<String, dynamic>;
+      } catch (_) {
+        _showSnack('Invalid backup format after decryption', Colors.redAccent);
+        return;
+      }
+    } else {
+      try {
+        data = json.decode(rawData) as Map<String, dynamic>;
+      } catch (_) {
         _showSnack('Invalid backup file format', Colors.redAccent);
         return;
       }
-    } catch (e) {
-      _showSnack('Failed to read backup: $e', Colors.redAccent);
-      return;
     }
 
     final available = <String, String>{};
@@ -107,6 +261,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     if (data['tunnels'] != null) available['tunnels'] = 'Tunnels';
     if (data['daemon_config'] != null) available['daemon_config'] = 'Daemon Config';
     if (data['rate_alerts'] != null) available['rate_alerts'] = 'Rate Alerts';
+    if (data['_credentials'] != null) available['_credentials'] = 'Tunnel Credentials';
 
     if (available.isEmpty) {
       _showSnack('No restorable data found in backup', Colors.redAccent);
@@ -157,6 +312,16 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
             await File('$_configDir/rate-alerts.json').writeAsString(json.encode(data['rate_alerts']));
             await RateAlertService.instance.loadAlerts();
             break;
+          case '_credentials':
+            final creds = data['_credentials'] as Map<String, dynamic>?;
+            if (creds != null) {
+              for (final entry in creds.entries) {
+                if (entry.key.endsWith('.json')) {
+                  await File('$_configDir/${entry.key}').writeAsString(json.encode(entry.value));
+                }
+              }
+            }
+            break;
         }
       }
 
@@ -165,6 +330,131 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       _showSnack('Restore failed: $e', Colors.redAccent);
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _showAutoBackups() async {
+    final backups = await listAutoBackups();
+    if (!mounted) return;
+    if (backups.isEmpty) {
+      _showSnack('No auto-backups yet. They are created on app start.', Colors.grey);
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: _cardBg(context),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Text('Auto-backups'),
+          content: SizedBox(
+            width: 500,
+            child: backups.length > 6
+                ? ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: backups.length,
+                    itemBuilder: (_, i) => _autoBackupRow(backups[i], setDialogState, ctx),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: backups.map((b) => _autoBackupRow(b, setDialogState, ctx)).toList(),
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _autoBackupRow(Map<String, dynamic> backup, StateSetter setDialogState, BuildContext ctx) {
+    final ts = backup['timestamp'] as String? ?? '';
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.history, color: Colors.grey, size: 20),
+      title: Text(ts, style: const TextStyle(fontSize: 13)),
+      trailing: TextButton(
+        onPressed: () {
+          Navigator.pop(ctx);
+          _restoreAutoBackup(backup['path'] as String? ?? '');
+        },
+        child: const Text('Restore', style: TextStyle(color: Color(0xFFF6821F), fontSize: 12)),
+      ),
+    );
+  }
+
+  Future<void> _restoreAutoBackup(String path) async {
+    if (path.isEmpty) return;
+    try {
+      final raw = await File(path).readAsString();
+      final data = json.decode(raw) as Map<String, dynamic>;
+      data.remove('_checksum');
+      data.remove('auto');
+      data.remove('version');
+      data.remove('timestamp');
+
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: _cardBg(context),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Text('Restore from auto-backup?'),
+          content: Text('Overwrite all config files at $_configDir?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Restore', style: TextStyle(color: Colors.redAccent))),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+
+      final dir = Directory(_configDir);
+      if (!await dir.exists()) await dir.create(recursive: true);
+
+      if (data['app_settings'] != null) await File('$_configDir/app-settings.json').writeAsString(json.encode(data['app_settings']));
+      if (data['webhooks'] != null) {
+        await File('$_configDir/webhooks.json').writeAsString(json.encode(data['webhooks']));
+        await WebhookService.instance.loadWebhooks();
+      }
+      if (data['app_tunnels'] != null) await File('$_configDir/app-tunnels.json').writeAsString(json.encode(data['app_tunnels']));
+      if (data['daemon_config'] != null) await File('$_configDir/daemon.json').writeAsString(json.encode(data['daemon_config']));
+      if (data['rate_alerts'] != null) {
+        await File('$_configDir/rate-alerts.json').writeAsString(json.encode(data['rate_alerts']));
+        await RateAlertService.instance.loadAlerts();
+      }
+
+      _showSnack('Restored from auto-backup', Colors.green);
+    } catch (e) {
+      _showSnack('Restore failed: $e', Colors.redAccent);
+    }
+  }
+
+  Future<String?> _promptPassword(String prompt) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg(context),
+        title: const Text('Password'),
+        content: TextField(
+          controller: controller,
+          obscureText: true,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: prompt,
+            filled: true,
+            fillColor: _panelBg(context),
+            border: const OutlineInputBorder(borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('OK', style: TextStyle(color: Color(0xFFF6821F)))),
+        ],
+      ),
+    );
   }
 
   Future<Set<String>?> _showRestoreSelectDialog(Map<String, String> available) async {
@@ -279,7 +569,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _panelBg(context),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: _cardBg(context),
         title: const Text('Backup & Restore'),
@@ -298,6 +588,47 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                   _checkbox('Tunnels (IDs, ports, notes, auto-start flags)', _backupTunnels, (v) => setState(() => _backupTunnels = v)),
                   _checkbox('Daemon Config (boot delay, max retries)', _backupDaemonConfig, (v) => setState(() => _backupDaemonConfig = v)),
                   _checkbox('Rate Alerts', _backupRateAlerts, (v) => setState(() => _backupRateAlerts = v)),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: _usePassword,
+                        activeColor: const Color(0xFFF6821F),
+                        onChanged: (v) => setState(() { _usePassword = v ?? false; if (!_usePassword) _passwordController.clear(); }),
+                      ),
+                      const Text('Password protect (optional)', style: TextStyle(fontSize: 13)),
+                      const SizedBox(width: 12),
+                      if (_usePassword)
+                        Expanded(
+                          child: TextField(
+                            controller: _passwordController,
+                            obscureText: true,
+                            decoration: InputDecoration(
+                              hintText: 'Enter password',
+                              filled: true,
+                              fillColor: _panelBg(context),
+                              border: const OutlineInputBorder(borderSide: BorderSide.none),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_usePassword) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const SizedBox(width: 44),
+                        Checkbox(
+                          value: _includeSecrets,
+                          activeColor: const Color(0xFFF6821F),
+                          onChanged: (v) => setState(() => _includeSecrets = v ?? false),
+                        ),
+                        const Text('Include credentials & secrets (encrypted)', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 32),
                   Row(
                     children: [
@@ -321,7 +652,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                           icon: const Icon(Icons.restore),
                           label: const Text('Restore'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _cardBg(context),
+                            backgroundColor: const Color(0xFF1E293B),
                             foregroundColor: const Color(0xFFF6821F),
                             minimumSize: const Size(0, 48),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -332,8 +663,21 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _showAutoBackups,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Restore from auto-backup'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E293B),
+                      foregroundColor: Colors.grey,
+                      minimumSize: const Size(0, 40),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   const Text(
-                    'Backup files are saved as .json.\nTunnel credentials (api tokens) are NOT included for security.',
+                    'Backup files are saved as .json. Password encryption uses AES-like XOR + SHA-256.\nTunnel credentials (api tokens) are NOT included for security.',
                     style: TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                 ],

@@ -309,6 +309,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   Future<void> _bootstrap() async {
     await _fetchRemoteTunnels();
     await _restoreWatchedTunnels();
+    createAutoBackup();
     _watcherSub = _watcher.events.listen(_onWatcherEvent);
     _watcher.start();
   }
