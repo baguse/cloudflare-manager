@@ -996,6 +996,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
   void _offerBind(int port, OpenPort? openPort) {
     if (!mounted) return;
+    if (!_isDaemonRunning) return;
     if (_tunnelLabelForPort(port) != null) return;
     if (!_isPortAllowed(port)) return;
     if (_offeredPorts.contains(port)) return;
