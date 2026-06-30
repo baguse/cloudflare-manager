@@ -9,6 +9,7 @@ import 'settings_screen.dart';
 import 'dns_editor_screen.dart';
 import 'webhook_screen.dart';
 import 'rate_alert_screen.dart';
+import 'backup_restore_screen.dart';
 import 'webhook_service.dart';
 import 'rate_alert_service.dart';
 import 'daemon/events.dart';
@@ -1112,6 +1113,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen())),
         ),
         ListTile(
+          leading: const Icon(Icons.backup, color: Colors.grey),
+          title: const Text('Backup & Restore', style: TextStyle(color: Colors.grey)),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
+        ),
+        ListTile(
           leading: const Icon(Icons.settings, color: Colors.grey),
           title: const Text('Settings', style: TextStyle(color: Colors.grey)),
           onTap: () async {
@@ -1199,6 +1205,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         _sidebarIcon(Icons.webhook, 'Webhooks', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WebhookScreen()))),
         const SizedBox(height: 8),
         _sidebarIcon(Icons.speed, 'Rate Alerts', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RateAlertScreen()))),
+        const SizedBox(height: 8),
+        _sidebarIcon(Icons.backup, 'Backup & Restore', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupRestoreScreen()))),
         const SizedBox(height: 8),
         _sidebarIcon(Icons.settings, 'Settings', onTap: () async {
           await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
