@@ -69,7 +69,6 @@ class RateAlertService {
   void startChecker() {
     _checkTimer?.cancel();
     _checkTimer = Timer.periodic(_checkInterval, (_) => checkNow());
-    checkNow();
   }
 
   void _ensureChecker() {
