@@ -83,29 +83,84 @@ Future<void> _runDaemonOnly() async {
   await Completer<void>().future;
 }
 
+class _RefreshTunnelsIntent extends Intent {
+  const _RefreshTunnelsIntent();
+}
+class _RefreshPortsIntent extends Intent {
+  const _RefreshPortsIntent();
+}
+class _CloseDialogIntent extends Intent {
+  const _CloseDialogIntent();
+}
+
 class CloudflareManagerApp extends StatelessWidget {
   const CloudflareManagerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Cloudflare Tunnel Manager',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0F172A),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFFF6821F), // Cloudflare Orange
-          surface: Color(0xFF1E293B),
-          background: Color(0xFF0F172A),
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyR, control: true): () =>
+            Actions.maybeInvoke(context, const _RefreshTunnelsIntent()),
+        const SingleActivator(LogicalKeyboardKey.keyR, meta: true): () =>
+            Actions.maybeInvoke(context, const _RefreshTunnelsIntent()),
+        const SingleActivator(LogicalKeyboardKey.f5): () =>
+            Actions.maybeInvoke(context, const _RefreshTunnelsIntent()),
+        const SingleActivator(LogicalKeyboardKey.keyR, control: true, shift: true): () =>
+            Actions.maybeInvoke(context, const _RefreshPortsIntent()),
+        const SingleActivator(LogicalKeyboardKey.keyR, meta: true, shift: true): () =>
+            Actions.maybeInvoke(context, const _RefreshPortsIntent()),
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Actions.maybeInvoke(context, const _CloseDialogIntent()),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _RefreshTunnelsIntent: CallbackAction<_RefreshTunnelsIntent>(
+            onInvoke: (_) {
+              var state = context.findAncestorStateOfType<State<DashboardScreen>>();
+              if (state != null && state.mounted) {
+                (state as dynamic)._fetchRemoteTunnels();
+              }
+              return null;
+            },
+          ),
+          _RefreshPortsIntent: CallbackAction<_RefreshPortsIntent>(
+            onInvoke: (_) {
+              var state = context.findAncestorStateOfType<State<DashboardScreen>>();
+              if (state != null && state.mounted) {
+                (state as dynamic)._fetchPorts();
+              }
+              return null;
+            },
+          ),
+          _CloseDialogIntent: CallbackAction<_CloseDialogIntent>(
+            onInvoke: (_) {
+              final nav = Navigator.of(context);
+              if (nav.canPop()) nav.pop();
+              return null;
+            },
+          ),
+        },
+        child: MaterialApp(
+          title: 'Cloudflare Tunnel Manager',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: const Color(0xFF0F172A),
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFFF6821F), // Cloudflare Orange
+              surface: Color(0xFF1E293B),
+              background: Color(0xFF0F172A),
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+            ),
+            useMaterial3: true,
+          ),
+          home: const DashboardScreen(),
         ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-        ),
-        useMaterial3: true,
       ),
-      home: const DashboardScreen(),
     );
   }
 }
@@ -1384,7 +1439,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           : IconButton(
               icon: const Icon(Icons.refresh, size: 20, color: Colors.grey),
               onPressed: _fetchRemoteTunnels,
-              tooltip: 'Refresh Cloudflare API Tunnels',
+              tooltip: 'Refresh Tunnels (Ctrl+R)',
             ),
       child: Column(
         children: [
