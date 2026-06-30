@@ -2362,7 +2362,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             subtitle: service.isNotEmpty ? '$service  •  Inactive' : 'Inactive',
             isLocal: false,
             isConnected: false,
-            onBind: hostname.isNotEmpty ? () => _bindExistingTunnel(tunnelId) : null,
+            onBind: (hostname.isNotEmpty && _isDaemonRunning) ? () => _bindExistingTunnel(tunnelId) : null,
           ));
         }
       }
