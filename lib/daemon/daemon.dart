@@ -279,8 +279,12 @@ class CloudflareDaemon {
           final id = msg['tunnelId'] as String?;
           final runner = id != null ? _runners[id] : null;
           if (runner != null) {
-            runner.start();
-            _sendIpc(client, {'ok': true});
+            try {
+              await runner.start();
+              _sendIpc(client, {'ok': true});
+            } catch (e) {
+              _sendIpc(client, {'ok': false, 'error': e.toString()});
+            }
           } else {
             _sendIpc(client, {'ok': false, 'error': 'tunnel not found'});
           }
