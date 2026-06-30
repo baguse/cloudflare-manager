@@ -22,6 +22,10 @@ class TunnelInfo {
 class CloudflaredService {
   static String _executablePath = 'cloudflared';
 
+  static String _normalizeBase64(String input) {
+    return input.padRight((input.length + 3) ~/ 4 * 4, '=');
+  }
+
   static Future<bool> isInstalled() async {
     final List<String> searchPaths = [];
 
@@ -104,7 +108,7 @@ class CloudflaredService {
           final token = tokenEnd == -1 ? afterToken : afterToken.substring(0, tokenEnd);
           if (token.isNotEmpty) {
             try {
-              final decoded = utf8.decode(base64Decode(token));
+              final decoded = utf8.decode(base64Decode(_normalizeBase64(token)));
               final tokenData = json.decode(decoded);
               final id = tokenData['t'];
               if (id is String) tunnelId = id;
@@ -510,7 +514,7 @@ class CloudflaredService {
 
   static Future<String?> writeCredentialsFile(String token) async {
     try {
-      final decoded = json.decode(utf8.decode(base64Decode(token)));
+      final decoded = json.decode(utf8.decode(base64Decode(_normalizeBase64(token))));
       final tunnelId = decoded['t'] as String?;
       final accountId = decoded['a'] as String?;
       final secret = decoded['s'] as String?;
@@ -617,7 +621,7 @@ class CloudflaredService {
           final tokenEnd = afterToken.indexOf(RegExp(r'\s'));
           final token = tokenEnd == -1 ? afterToken : afterToken.substring(0, tokenEnd);
           try {
-            final decoded = utf8.decode(base64Decode(token));
+            final decoded = utf8.decode(base64Decode(_normalizeBase64(token)));
             final tokenData = json.decode(decoded);
             if (tokenData['t'] == tunnelId) match = true;
           } catch (e) {}
