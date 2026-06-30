@@ -172,7 +172,8 @@ class WebhookService {
     final trigger = _mapEventToTrigger(event.type);
     if (trigger == null) return;
 
-    final matchingWebhooks = _webhooks.where(
+    final webhooks = List<WebhookConfig>.from(_webhooks);
+    final matchingWebhooks = webhooks.where(
       (w) => w.enabled && w.triggers.contains(trigger),
     ).toList();
 
