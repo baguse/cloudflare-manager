@@ -242,7 +242,8 @@ class WebhookService {
       } catch (e) {
         if (attempt < maxRetries) {
           _debugLog('[retry ${attempt + 1}/$maxRetries] ${webhook.name}: $e');
-          await Future.delayed(const Duration(seconds: 2));
+          final delay = Duration(seconds: (1 << attempt).clamp(1, 60));
+          await Future.delayed(delay);
           continue;
         }
         await _addLog(WebhookLog(
