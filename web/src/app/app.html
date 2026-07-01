@@ -1,7 +1,7 @@
 <div [class.dark]="theme()==='dark'" class="app-shell">
   @if (!configured()) {
     <div class="login-card">
-      <div class="login-icon">☁️</div>
+      <div class="login-icon"><span class="material-icons" style="font-size:48px">cloud</span></div>
       <h2>Cloudflare Manager</h2>
       <p class="login-sub">Connect to your API server</p>
       <input class="input" [(ngModel)]="apiUrl" placeholder="API URL (e.g. http://localhost:9845)">
@@ -22,22 +22,25 @@
         </button>
       </div>
       <div class="spacer"></div>
-      <button class="theme-btn" (click)="toggleTheme()">{{theme()==='dark'?'☀️':'🌙'}}</button>
+      <button class="theme-btn" (click)="toggleTheme()"><span class="material-icons" style="font-size:16px">{{theme()==='dark'?'dark_mode':'light_mode'}}</span></button>
       <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>{{connLabel()}}</div>
     </aside>
     <main class="main">
       <div *ngIf="refreshing()" class="loading-bar"></div>
       @switch (activeTab()) {
         @case ('tunnels') {
-          <div class="page-header"><h1>Dashboard</h1><div class="actions">              <button class="btn btn-ghost btn-sm" (click)="refreshAll()">↻</button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
+          <div class="page-header"><h1>Dashboard</h1><div class="actions">              <button class="btn btn-ghost btn-sm" (click)="refreshAll()"><span class="material-icons" style="font-size:16px">refresh</span></button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
           @if (showBind) {
             <div class="card bind-row"><input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain"><select class="input" [(ngModel)]="bind.zoneId"><option value="">Select domain...</option><option *ngFor="let z of zones" [value]="z.id">{{z.name}}</option></select><input class="input" [(ngModel)]="bind.port" placeholder="Port" type="number"><button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button></div>
           }
           <div class="stats-row"><div class="stat"><span class="stat-num">{{tunnels().length}}</span><span class="stat-label">Tunnels</span></div><div class="stat"><span class="stat-num green">{{runningCount()}}</span><span class="stat-label">Running</span></div><div class="stat"><span class="stat-num red">{{crashedCount()}}</span><span class="stat-label">Crashed</span></div><div class="stat"><span class="stat-num muted">{{stoppedCount()}}</span><span class="stat-label">Stopped</span></div></div>
           <div class="card">
-            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th style="width:220px">Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td><td>{{t.hostname||'-'}}</td><td class="muted">{{t.port||'-'}}</td><td class="action-cell">
-                      <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=''"><span class="material-icons" style="font-size:16px">edit_note</span></button>
-                      <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)"><span class="material-icons" style="font-size:16px">shield</span></button>
+            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th style="width:220px">Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td>                <td>{{t.hostname||'-'}}
+                  <span *ngFor="let tag of splitTags(t.tags)" class="tag-chip" [ngStyle]="getTagStyle(tag)">{{tag}}</span>
+                  <span *ngIf="t.notes" class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span><td class="muted">{{t.port||'-'}}</td><td class="action-cell">
+                      <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)"><span class="material-icons" style="font-size:16px">edit_note</span></button>
+                      <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)"
+                        [style.color]="t.serviceEnabled?'var(--green)':''"><span class="material-icons" style="font-size:16px">shield</span></button>
                       <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl(t.hostname?'https://'+t.hostname:'')"><span class="material-icons" style="font-size:16px">content_copy</span></button>
                       <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr(t.hostname?'https://'+t.hostname:'')"><span class="material-icons" style="font-size:16px">qr_code</span></button>
                       <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)"><span class="material-icons" style="font-size:16px">terminal</span></button>
@@ -68,7 +71,7 @@
           <div *ngFor="let a of alerts" class="card hook-row"><div><b>{{a.name}}</b><span class="muted text-xs">{{a.domain}} · {{a.thresholdPerHour}}/hr</span></div><button class="btn btn-ghost btn-xs" (click)="delAlert(a.id)">Del</button></div>
         }
         @case ('backup') {
-          <div class="page-header"><h1>Backup &amp; Restore</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="loadBackups()">↻</button><button class="btn btn-primary btn-sm" (click)="createBackup()">Create Backup</button></div></div>
+          <div class="page-header"><h1>Backup &amp; Restore</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="loadBackups()"><span class="material-icons" style="font-size:16px">refresh</span></button><button class="btn btn-primary btn-sm" (click)="createBackup()">Create Backup</button></div></div>
           <div *ngIf="backups.length===0" class="empty">No backups yet</div>
           <div *ngFor="let b of backups" class="card mono text-sm">{{b.timestamp}}</div>
         }
@@ -78,7 +81,25 @@
         }
       }
     </main>
-    <div *ngIf="logsModal()" class="modal-overlay" (click)="logsModal.set(false)"><div class="modal" (click)="$event.stopPropagation()"><div class="modal-head"><b>Logs</b><button class="btn btn-ghost btn-sm" (click)="logsModal.set(false)">✕</button></div><div class="log-body"><div *ngFor="let l of logLines()" class="mono">{{l}}</div><div *ngIf="logLines().length===0" class="muted">No logs</div></div></div></div>
+    <div *ngIf="editingNotes" class="modal-overlay" (click)="editingNotes=null"><div class="modal" (click)="$event.stopPropagation()" style="width:480px">
+      <div class="modal-head"><span class="material-icons" style="font-size:20px;color:var(--accent)">edit_note</span><b>Tunnel Notes &amp; Tags</b><button class="btn btn-ghost btn-sm" (click)="editingNotes=null"><span class="material-icons" style="font-size:18px">close</span></button></div>
+      <label class="field-label">Notes</label>
+      <textarea class="input" [(ngModel)]="notesText" placeholder="e.g. staging env, behind SSO, owned by @alice" rows="3" style="resize:vertical;width:100%;box-sizing:border-box"></textarea>
+      <label class="field-label">Tags <span style="font-size:10px;font-weight:400;color:var(--muted)">Max 5 tags</span></label>
+      <div class="tag-row">
+        <span *ngFor="let tag of selectedTags" class="tag-chip" [ngStyle]="getTagStyle(tag)" style="cursor:default">{{tag}}<span class="tag-close" (click)="removeTag(tag)">×</span></span>
+      </div>
+      <div class="field-label">Preset tags:</div>
+      <div class="tag-row">
+        <span *ngFor="let tag of presetTags" class="tag-chip preset" [class.selected]="selectedTags.includes(tag)" [ngStyle]="selectedTags.includes(tag)?getTagStyle(tag):{'background':'transparent','color':'var(--muted)','border-color':'var(--border)'}" (click)="togglePresetTag(tag)">{{tag}}</span>
+      </div>
+      <div class="bind-row" style="margin-top:8px">
+        <input class="input" [(ngModel)]="customTag" placeholder="Custom tag" (keyup.enter)="addCustomTag()" style="flex:1">
+        <button class="btn btn-ghost btn-sm" (click)="addCustomTag()">Add</button>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px" (click)="saveNotes()">Save</button>
+    </div></div>
+    <div *ngIf="logsModal()" class="modal-overlay" (click)="logsModal.set(false)"><div class="modal" (click)="$event.stopPropagation()"><div class="modal-head"><b>Logs</b><button class="btn btn-ghost btn-sm" (click)="logsModal.set(false)"><span class="material-icons" style="font-size:18px">close</span></button></div><div class="log-body"><div *ngFor="let l of logLines()" class="mono">{{l}}</div><div *ngIf="logLines().length===0" class="muted">No logs</div></div></div></div>
     <div *ngIf="toastMsg" class="toast" [class.toast-err]="toastError" (click)="toastMsg=''">{{toastMsg}}</div>
   }
 </div>

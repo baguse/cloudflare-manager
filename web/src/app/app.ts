@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 
-interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; }
+interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; }
 interface DnsZone { id: string; name: string; }
 interface DnsRecord { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean; }
 interface WebhookConfig { id: string; name: string; type: string; enabled: boolean; triggers: string[]; url?: string; }
@@ -38,7 +38,8 @@ export class AppComponent implements OnInit {
   showBind = false; bind = {subdomain:'',zoneId:'',port:0};
   logsModal = signal(false); logLines = signal<string[]>([]);
   toastMsg = ''; toastError = false;
-  editingNotes: string|null = null; notesText = '';
+  editingNotes: string|null = null; notesText = ''; selectedTags: string[] = []; customTag = '';
+  presetTags = ['prod','staging','dev','api','internal','testing','monitoring','backend','frontend','database','auth','webhook'];
   watcherEnabled = true; daemonRunning = false;
   refreshing = signal(false);
 
@@ -61,7 +62,7 @@ export class AppComponent implements OnInit {
 
   async refreshAll() { this.refreshing.set(true); await this.refreshTunnels(); await this.loadZones(); await this.loadWebhooks(); await this.loadAlerts(); await this.loadSettings(); this.refreshing.set(false); }
 
-  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/status','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch { this.connected.set(false); } finally { this.refreshing.set(false); } }
+  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/status','GET'); this.tunnels.set((r.tunnels||[]).map((t:any)=>({...t,notes:t.notes||'',tags:t.tags||''}))); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch { this.connected.set(false); } finally { this.refreshing.set(false); } }
   stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':'badge-gray'; }
 
   async quickBind() {
@@ -94,20 +95,31 @@ export class AppComponent implements OnInit {
   async loadSettings() { try{const r=await this.api('/api/settings','GET');this.settings=r.settings||{};}catch{} }
   async saveSettings() { try{await this.api('/api/settings','PATCH',this.settings);this.showToast('Saved');}catch{this.showToast('Error',true);} }
 
-  async saveNotes() { if(!this.editingNotes)return; try{await this.api('/api/settings','PATCH',{[`tunnel_${this.editingNotes}_notes`]:this.notesText});this.showToast('Saved');this.editingNotes=null;}catch{this.showToast('Error',true);} }
+  async saveNotes() { if(!this.editingNotes)return;
+    try{ await this.api('/api/tunnels/'+this.editingNotes+'/notes','PUT',{notes:this.notesText,tags:this.selectedTags.join(',')}); this.showToast('Saved'); this.editingNotes=null; this.refreshTunnels(); }catch{this.showToast('Error',true);}
+  }
+  togglePresetTag(tag:string) { const i=this.selectedTags.indexOf(tag); if(i>=0) this.selectedTags.splice(i,1); else { if(this.selectedTags.length>=5) return this.showToast('Max 5 tags',true); this.selectedTags.push(tag); } this.selectedTags=[...this.selectedTags]; }
+  addCustomTag() { const t=this.customTag.trim(); if(!t) return; if(this.selectedTags.length>=5) return this.showToast('Max 5 tags',true); if(!this.selectedTags.includes(t)) this.selectedTags=[...this.selectedTags,t]; this.customTag=''; }
+  removeTag(tag:string) { this.selectedTags=this.selectedTags.filter(t=>t!==tag); }
   async toggleService(tunnelId:string,hostname:string) {
-    try{
-      const r=await this.api('/api/settings','GET');
-      const s=r.settings||{};
-      const k=`service_${tunnelId}`;
-      const v=s[k]==='true'?'false':'true';
-      await this.api('/api/settings','PATCH',{[k]:v});
-      this.showToast(v==='true'?'Auto-start enabled for '+hostname:'Auto-start disabled');
-      this.refreshTunnels();
-    }catch{this.showToast('Error',true);}
+    try{ const t = this.tunnels().find(x=>x.tunnelId===tunnelId); const v = !(t?.serviceEnabled); await this.api('/api/tunnels/'+tunnelId+'/service','PUT',{enabled:v}); this.showToast(v?'Auto-start enabled for '+hostname:'Auto-start disabled'); this.refreshTunnels(); }catch{this.showToast('Error',true);}
   }
   async copyUrl(url:string) { try{await navigator.clipboard.writeText(url);this.showToast('Copied!');}catch{this.showToast('Copy failed',true);} }
   showQr(url:string) { const qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=150x150&data='+encodeURIComponent(url); window.open(qrUrl,'_blank'); }
+  private _tagColors: Record<string,string> = {
+    prod:'#E53935',production:'#E53935',staging:'#FF8F00',dev:'#42A5F5',development:'#42A5F5',
+    api:'#7C4DFF',internal:'#00ACC1',testing:'#43A047',monitoring:'#FDD835',backend:'#1E88E5',
+    frontend:'#43A047',database:'#8E24AA',auth:'#E53935',webhook:'#FF8F00',
+  };
+  tagColor(tag:string): string {
+    const c = this._tagColors[tag.toLowerCase()] || '#6366F1';
+    return 'tag-'+c.replace('#','');
+  }
+  getTagStyle(tag:string) {
+    const c = this._tagColors[tag.toLowerCase()] || '#6366F1';
+    return {'background': c+'26', 'color': c, 'border-color': c+'66'};
+  }
+  splitTags(tags?:string): string[] { return (tags||'').split(',').map(t=>t.trim()).filter(t=>t.length>0); }
   toggleWatcher() { this.watcherEnabled=!this.watcherEnabled; this.showToast('Watcher '+(this.watcherEnabled?'enabled':'disabled')); }
   async killDaemons() { if(!confirm('Kill all cloudflared processes?'))return; try{await this.api('/api/daemon/stop','POST');this.showToast('Daemon killed');}catch{this.showToast('Error',true);} }
   async startDaemon() { try{await this.api('/api/daemon/start','POST');this.showToast('Daemon starting...');this.daemonRunning=true;}catch{this.showToast('Error',true);} }

@@ -339,19 +339,20 @@ class CloudflaredService {
     return (notes: null, tags: null);
   }
 
-  static Future<Map<String, ({String? notes, String? tags})>> readAllTunnelNotes() async {
+  static Future<Map<String, ({String? notes, String? tags, bool serviceEnabled})>> readAllTunnelNotes() async {
     final file = _appTunnelMapFile();
     if (file == null) return {};
     try {
       if (!await file.exists()) return {};
       final data = json.decode(await file.readAsString());
       if (data is Map) {
-        final out = <String, ({String? notes, String? tags})>{};
+        final out = <String, ({String? notes, String? tags, bool serviceEnabled})>{};
         data.forEach((k, v) {
           if (v is Map) {
             out[k.toString()] = (
               notes: v['notes'] as String?,
               tags: v['tags'] as String?,
+              serviceEnabled: v['serviceEnabled'] == true,
             );
           }
         });

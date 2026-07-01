@@ -112,6 +112,12 @@ class HttpApiServer {
         case _ when routePath.startsWith('/tunnels/') && method == 'DELETE':
           await _handleUnbindTunnel(segments[1], request.response);
           break;
+        case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/notes') && method == 'PUT':
+          await _handleSaveTunnelNotes(segments[1], request);
+          break;
+        case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/service') && method == 'PUT':
+          await _handleToggleService(segments[1], request);
+          break;
         case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/delete') && method == 'POST':
           await _handleDeleteTunnel(segments[1], request.response);
           break;
@@ -578,7 +584,20 @@ class HttpApiServer {
     request.response.close();
   }
 
-  // ---- Delete tunnel (full) ----
+  Future<void> _handleToggleService(String tunnelId, HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final enabled = body['enabled'] == true;
+    await CloudflaredService.saveServiceEnabled(tunnelId, enabled);
+    _jsonResponse(request.response, 200, {'ok': true, 'serviceEnabled': enabled});
+  }
+
+  Future<void> _handleSaveTunnelNotes(String tunnelId, HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final notes = body['notes'] as String?;
+    final tags = body['tags'] as String?;
+    await CloudflaredService.saveTunnelNotes(tunnelId, notes: notes, tags: tags);
+    _jsonResponse(request.response, 200, {'ok': true});
+  }
 
   Future<void> _handleDeleteTunnel(String tunnelId, HttpResponse response) async {
     await CloudflaredService.unregisterAppTunnel(tunnelId);

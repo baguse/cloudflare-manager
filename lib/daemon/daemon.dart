@@ -222,19 +222,34 @@ class CloudflareDaemon {
     try {
       _apiServer = HttpApiServer(port: port, apiKey: apiKey,
         onGetStatusDirect: () async {
+          final notesMap = await CloudflaredService.readAllTunnelNotes();
           return {
             'ok': true,
             'running': _running,
-            'tunnels': _runners.values.map((r) => r.toJson()).toList(),
+            'tunnels': _runners.values.map((runner) {
+              final j = runner.toJson();
+              final n = notesMap[runner.tunnelId];
+              if (n?.notes != null) j['notes'] = n!.notes;
+              if (n?.tags != null) j['tags'] = n!.tags;
+              j['serviceEnabled'] = n?.serviceEnabled == true;
+              return j;
+            }).toList(),
             'eventCount': _eventLog.length,
           };
         },
         onIpcCall: (String cmd, Map<String, dynamic>? args) async {
           switch (cmd) {
             case 'status':
+              final notesMap = await CloudflaredService.readAllTunnelNotes();
               return {
                 'ok': true, 'running': _running,
-                'tunnels': _runners.values.map((r) => r.toJson()).toList(),
+                'tunnels': _runners.values.map((runner) {
+                  final j = runner.toJson();
+                  final n = notesMap[runner.tunnelId];
+                  if (n?.notes != null) j['notes'] = n!.notes;
+                  if (n?.tags != null) j['tags'] = n!.tags;
+                  return j;
+                }).toList(),
                 'eventCount': _eventLog.length,
               };
             case 'tunnel_bind':
