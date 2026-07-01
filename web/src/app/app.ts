@@ -30,7 +30,7 @@ export class AppComponent implements OnInit {
   tunnels = signal<Tunnel[]>([]);
   runningCount = computed(() => this.tunnels().filter(t=>t.state==='running').length);
   crashedCount = computed(() => this.tunnels().filter(t=>t.state==='crashed').length);
-  stoppedCount = computed(() => this.tunnels().filter(t=>t.state==='stopped').length);
+  stoppedCount = computed(() => this.tunnels().filter(t=>t.state==='stopped'||t.state==='inactive').length);
   zones: DnsZone[] = []; dnsZone = ''; dnsRecords: DnsRecord[] = []; showDnsForm = false; dnsForm = {type:'A',name:'',content:'',ttl:1};
   webhooks: WebhookConfig[] = []; showWForm = false; wForm = {name:'',url:'',type:'http'};
   alerts: RateAlert[] = []; showAForm = false; aForm = {name:'',domain:'',thresholdPerHour:10000};
