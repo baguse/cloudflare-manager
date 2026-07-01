@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:crypto/crypto.dart';
 import 'webhook_service.dart';
 import 'rate_alert_service.dart';
+import 'cloudflare_service.dart';
 
 const _kAutoBackupDir = '.cloudflared/backups';
 const _kMaxAutoBackups = 10;
@@ -497,30 +498,33 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     );
   }
 
-  Future<String?> _pickFilePath({String? defaultName, required String title, required String hint, String? defaultPath, String mode = 'save'}) async {
+  Future<String?> _pickFilePath({String? defaultName, required String title, required String hint, String? defaultPath, String mode = 'save', List<String>? allowedExtensions}) async {
+    final exts = allowedExtensions ?? ['json'];
     try {
       if (mode == 'save') {
         final path = await FilePicker.platform.saveFile(
           dialogTitle: title,
           fileName: defaultName,
           type: FileType.custom,
-          allowedExtensions: ['json'],
+          allowedExtensions: exts,
         );
-        if (path != null) return path;
+        return path; // null = user cancelled, don't fallback
       } else {
         final result = await FilePicker.platform.pickFiles(
           dialogTitle: title,
           type: FileType.custom,
-          allowedExtensions: ['json'],
+          allowedExtensions: exts,
         );
         if (result != null && result.files.isNotEmpty && result.files.single.path != null) {
           return result.files.single.path;
         }
+        return null; // user cancelled, don't fallback
       }
-    } catch (_) {}
-
-    if (!mounted) return null;
-    return await _showManualPathDialog(title: title, hint: hint, defaultPath: defaultPath ?? '');
+    } catch (_) {
+      // file_picker not available, use fallback
+      if (!mounted) return null;
+      return await _showManualPathDialog(title: title, hint: hint, defaultPath: defaultPath ?? '');
+    }
   }
 
   Future<String?> _showManualPathDialog({required String title, required String hint, String defaultPath = ''}) async {
@@ -558,6 +562,112 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _exportJson() async { await _doExport('json'); }
+  Future<void> _exportMarkdown() async { await _doExport('md'); }
+
+  Future<void> _doExport(String format) async {
+    setState(() => _loading = true);
+    try {
+      final export = <String, dynamic>{'generatedAt': DateTime.now().toIso8601String()};
+      final tunnels = await CloudflareService.listTunnels();
+      final tunnelList = <Map<String, dynamic>>[];
+      for (final t in tunnels) {
+        final id = t['id'] as String? ?? '';
+        final cfg = await CloudflareService.getTunnelConfig(id);
+        final ingress = (cfg?['config']?['ingress'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
+        tunnelList.add({
+          'id': id,
+          'name': t['name'],
+          'status': t['status'] ?? 'unknown',
+          'connections': t['connections'] ?? [],
+          'ingress': ingress,
+        });
+      }
+      export['tunnels'] = tunnelList;
+
+      final zones = await CloudflareService.getZones();
+      final zoneList = <Map<String, dynamic>>[];
+      for (final z in zones) {
+        final records = await CloudflareService.listDnsRecords(z['id']);
+        zoneList.add({
+          'id': z['id'],
+          'name': z['name'],
+          'status': z['status'],
+          'records': records,
+        });
+      }
+      export['dns'] = zoneList;
+
+      String content;
+      String ext;
+      if (format == 'json') {
+        content = const JsonEncoder.withIndent('  ').convert(export);
+        ext = 'json';
+      } else {
+        final buf = StringBuffer();
+        buf.writeln('# Cloudflare Tunnel Manager — Export');
+        buf.writeln('> Generated: ${export['generatedAt']}');
+        buf.writeln();
+        buf.writeln('## Tunnels');
+        for (final t in tunnelList) {
+          buf.writeln('### ${t['name']}');
+          buf.writeln('- **ID**: `${t['id']}`');
+          buf.writeln('- **Status**: ${t['status']}');
+          buf.writeln('- **Connections**: ${(t['connections'] as List).length}');
+          final ingress = t['ingress'] as List;
+          if (ingress.isNotEmpty) {
+            buf.writeln('- **Ingress Rules**:');
+            for (final rule in ingress) {
+              final hostname = rule['hostname'] ?? '(catch-all)';
+              final service = rule['service'] ?? '';
+              buf.writeln('  - `${hostname}` → `$service`');
+            }
+          }
+          buf.writeln();
+        }
+        buf.writeln('## DNS Records');
+        for (final z in zoneList) {
+          buf.writeln('### ${z['name']}');
+          final records = z['records'] as List;
+          if (records.isEmpty) {
+            buf.writeln('_No records_');
+            buf.writeln();
+            continue;
+          }
+          buf.writeln('| Type | Name | Content | TTL | Proxied |');
+          buf.writeln('|------|------|---------|-----|---------|');
+          for (final r in records) {
+            final ttl = r['ttl'];
+            buf.writeln('| ${r['type']} | ${r['name']} | ${r['content']} | ${ttl == 1 ? 'auto' : ttl} | ${r['proxied'] == true ? '✅' : '—'} |');
+          }
+          buf.writeln();
+        }
+        content = buf.toString();
+        ext = 'md';
+      }
+
+      final defaultName = 'cloudflare-manager-export-${DateTime.now().toIso8601String().split('T').first}.$ext';
+      String? outputPath = await _pickFilePath(
+        defaultName: defaultName,
+        title: 'Save export',
+        hint: 'Enter full path (e.g. /home/user/$defaultName)',
+        defaultPath: '${_configDir}/export-${DateTime.now().toIso8601String().split('T').first}.$ext',
+        allowedExtensions: [ext],
+      );
+
+      if (outputPath == null) {
+        setState(() => _loading = false);
+        return;
+      }
+
+      await File(outputPath).writeAsString(content);
+      _showSnack('Export saved to $outputPath', Colors.green);
+    } catch (e) {
+      _showSnack('Export failed: $e', Colors.redAccent);
+    }
+    setState(() => _loading = false);
   }
 
   void _showSnack(String msg, Color color) {
@@ -640,6 +750,45 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                       ],
                     ),
                   ],
+                  const SizedBox(height: 16),
+                  const Text('Export Tunnels & DNS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _exportJson,
+                          icon: const Icon(Icons.data_object, size: 16),
+                          label: const Text('JSON'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1E293B),
+                            foregroundColor: Colors.grey,
+                            minimumSize: const Size(0, 36),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            side: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _exportMarkdown,
+                          icon: const Icon(Icons.description, size: 16),
+                          label: const Text('Markdown'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1E293B),
+                            foregroundColor: Colors.grey,
+                            minimumSize: const Size(0, 36),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            side: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Text('Exports all tunnels + DNS records. JSON for IaC, Markdown for docs.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
                   const SizedBox(height: 32),
                   Row(
                     children: [
