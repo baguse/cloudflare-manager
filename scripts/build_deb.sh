@@ -33,6 +33,15 @@ mkdir -p "$DEB_ROOT/usr/share/doc/$NAME"
 echo "=== Copying application files ==="
 cp -r "$BUILD_DIR"/* "$DEB_ROOT/usr/lib/$NAME/"
 
+echo "=== Copying web dashboard ==="
+if [ -d "$PROJECT_DIR/web/dist/browser" ]; then
+  mkdir -p "$DEB_ROOT/usr/lib/$NAME/web/dist"
+  cp -r "$PROJECT_DIR/web/dist/browser" "$DEB_ROOT/usr/lib/$NAME/web/dist/"
+  echo "  Web dashboard included"
+else
+  echo "  Web dist not found at web/dist/browser — run 'cd web && npm run build' first"
+fi
+
 echo "=== Copying icon ==="
 ICON_DIR="$PROJECT_DIR/macos/Runner/Assets.xcassets/AppIcon.appiconset"
 if [ -d "$ICON_DIR" ]; then

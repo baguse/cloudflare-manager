@@ -620,17 +620,29 @@ class HttpApiServer {
   }
 
   String get _webDistDir {
-    // Try current directory first (most reliable)
-    final cwdPath = '${Directory.current.path}/web/dist';
-    if (Directory(cwdPath).existsSync()) return cwdPath;
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final exe = Platform.resolvedExecutable;
+    final exeDir = exe.contains('/') ? exe.substring(0, exe.lastIndexOf('/')) : '';
 
-    // Fallback: relative to script location
-    final scriptPath = Platform.script.toFilePath();
-    final parent = scriptPath.substring(0, scriptPath.lastIndexOf('/'));
-    if (parent.endsWith('/bin')) {
-      return '$parent/../web/dist';
+    final candidates = <String>[
+      '$home/.cloudflared/web/dist/browser',
+      '$home/.cloudflared/web/dist',
+      '${Directory.current.path}/web/dist/browser',
+      '${Directory.current.path}/web/dist',
+      '$exeDir/web/dist/browser',
+      '$exeDir/web/dist',
+      '$exeDir/../web/dist/browser',
+      '$exeDir/../web/dist',
+    ];
+
+    print('[api] Web dist candidates:');
+    for (final dir in candidates) {
+      final hasIndex = File('$dir/index.html').existsSync();
+      print('[api]   $dir ${hasIndex ? "✓ index.html" : "✗ no index.html"}');
+      if (hasIndex) return dir;
     }
-    return '$parent/web/dist';
+    print('[api] No web dist found, current dir: ${Directory.current.path}');
+    return candidates.first;
   }
 
   void _serveStatic(HttpResponse response, String path) {

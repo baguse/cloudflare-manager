@@ -1,0 +1,66 @@
+<div [class.dark]="theme()==='dark'" class="app-shell">
+  @if (!configured()) {
+    <div class="login-card">
+      <div class="login-icon">☁️</div>
+      <h2>Cloudflare Manager</h2>
+      <p class="login-sub">Connect to your API server</p>
+      <input class="input" [(ngModel)]="apiUrl" placeholder="API URL (e.g. http://localhost:9845)">
+      <input class="input" [(ngModel)]="apiKey" placeholder="API Key">
+      <button class="btn btn-primary full" (click)="connect()">Connect</button>
+    </div>
+  } @else {
+    <aside class="sidebar">
+      <div class="brand">CF Manager</div>
+      <div *ngFor="let t of tabs" class="sidebar-item" [class.active]="activeTab()===t.id" (click)="activeTab.set(t.id)">{{t.icon}} {{t.label}}</div>
+      <div class="spacer"></div>
+      <button class="theme-btn" (click)="toggleTheme()">{{theme()==='dark'?'☀️':'🌙'}}</button>
+      <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>{{connLabel()}}</div>
+    </aside>
+    <main class="main">
+      @switch (activeTab()) {
+        @case ('tunnels') {
+          <div class="page-header"><h1>Tunnels</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="refreshTunnels()">↻</button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
+          @if (showBind) {
+            <div class="card bind-row"><input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain"><select class="input" [(ngModel)]="bind.zoneId"><option value="">Select domain...</option><option *ngFor="let z of zones" [value]="z.id">{{z.name}}</option></select><input class="input" [(ngModel)]="bind.port" placeholder="Port" type="number"><button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button></div>
+          }
+          <div class="stats-row"><div class="stat"><span class="stat-num">{{tunnels().length}}</span><span class="stat-label">Tunnels</span></div><div class="stat"><span class="stat-num green">{{runningCount()}}</span><span class="stat-label">Running</span></div><div class="stat"><span class="stat-num red">{{crashedCount()}}</span><span class="stat-label">Crashed</span></div><div class="stat"><span class="stat-num muted">{{stoppedCount()}}</span><span class="stat-label">Stopped</span></div></div>
+          <div class="card">
+            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th>Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td><td>{{t.hostname||'-'}}</td><td class="muted">{{t.port||'-'}}</td><td class="action-cell"><button class="btn btn-ghost btn-xs" (click)="showLogs(t.tunnelId)">Logs</button><button class="btn btn-ghost btn-xs" (click)="unbind(t.tunnelId)">Unbind</button><button class="btn btn-ghost btn-xs danger" (click)="deleteTunnel(t.tunnelId)">Delete</button></td></tr></tbody></table>
+            <div *ngIf="tunnels().length===0" class="empty">No tunnels yet.</div>
+          </div>
+        }
+        @case ('dns') {
+          <div class="page-header"><h1>DNS Editor</h1></div>
+          <div class="card bind-row"><select class="input" [(ngModel)]="dnsZone" (change)="loadDns()"><option *ngFor="let z of zones" [value]="z.name">{{z.name}}</option></select><button class="btn btn-primary btn-sm" (click)="showDnsForm=true">+ New Record</button></div>
+          @if (showDnsForm) {
+            <div class="card"><div class="bind-row"><select class="input" [(ngModel)]="dnsForm.type"><option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option><option>MX</option></select><input class="input" [(ngModel)]="dnsForm.name" placeholder="Name"><input class="input" [(ngModel)]="dnsForm.content" placeholder="Content"><input class="input" [(ngModel)]="dnsForm.ttl" placeholder="TTL" value="1" style="width:80px"><button class="btn btn-primary btn-sm" (click)="saveDns()">Save</button><button class="btn btn-ghost btn-sm" (click)="showDnsForm=false">Cancel</button></div></div>
+          }
+          <div class="card"><table *ngIf="dnsRecords.length>0"><thead><tr><th>Type</th><th>Name</th><th>Content</th><th>TTL</th><th></th></tr></thead><tbody><tr *ngFor="let r of dnsRecords"><td>{{r.type}}</td><td class="mono">{{r.name}}</td><td class="mono muted">{{r.content}}</td><td>{{r.ttl==1?'auto':r.ttl}}</td><td class="action-cell"><button class="btn btn-ghost btn-xs" (click)="deleteDns(r)">Del</button></td></tr></tbody></table><div *ngIf="dnsRecords.length===0" class="empty">No records</div></div>
+        }
+        @case ('webhooks') {
+          <div class="page-header"><h1>Webhooks</h1><button class="btn btn-primary btn-sm" (click)="showWForm=true">+ New</button></div>
+          @if (showWForm) { <div class="card"><div class="bind-row"><input class="input" [(ngModel)]="wForm.name" placeholder="Name"><input class="input" [(ngModel)]="wForm.url" placeholder="URL"><button class="btn btn-primary btn-sm" (click)="saveWebhook()">Save</button><button class="btn btn-ghost btn-sm" (click)="showWForm=false">Cancel</button></div></div> }
+          <div *ngIf="webhooks.length===0" class="empty">No webhooks</div>
+          <div *ngFor="let w of webhooks" class="card hook-row"><div class="hook-info"><b>{{w.name}}</b><span class="badge badge-gray">{{w.type}}</span><span class="muted text-xs">{{(w.triggers||[]).join(', ')||'no triggers'}}</span></div><div class="action-cell"><button class="btn btn-ghost btn-xs" (click)="testWebhook(w.id)">Test</button><button class="btn btn-ghost btn-xs" (click)="delWebhook(w.id)">Del</button></div></div>
+        }
+        @case ('alerts') {
+          <div class="page-header"><h1>Rate Alerts</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="checkAlerts()">Check Now</button><button class="btn btn-primary btn-sm" (click)="showAForm=true">+ New</button></div></div>
+          @if (showAForm) { <div class="card"><div class="bind-row"><input class="input" [(ngModel)]="aForm.name" placeholder="Name"><input class="input" [(ngModel)]="aForm.domain" placeholder="Domain"><input class="input" [(ngModel)]="aForm.thresholdPerHour" placeholder="Threshold/hr" type="number"><button class="btn btn-primary btn-sm" (click)="saveAlert()">Save</button><button class="btn btn-ghost btn-sm" (click)="showAForm=false">Cancel</button></div></div> }
+          <div *ngIf="alerts.length===0" class="empty">No alerts</div>
+          <div *ngFor="let a of alerts" class="card hook-row"><div><b>{{a.name}}</b><span class="muted text-xs">{{a.domain}} · {{a.thresholdPerHour}}/hr</span></div><button class="btn btn-ghost btn-xs" (click)="delAlert(a.id)">Del</button></div>
+        }
+        @case ('backup') {
+          <div class="page-header"><h1>Backup &amp; Restore</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="loadBackups()">↻</button><button class="btn btn-primary btn-sm" (click)="createBackup()">Create Backup</button></div></div>
+          <div *ngIf="backups.length===0" class="empty">No backups yet</div>
+          <div *ngFor="let b of backups" class="card mono text-sm">{{b.timestamp}}</div>
+        }
+        @case ('settings') {
+          <div class="page-header"><h1>Settings</h1></div>
+          <div class="card"><div *ngFor="let key of settingsKeys()" class="setting-row"><span>{{key}}</span><input class="input" [(ngModel)]="settings[key]" style="width:320px"></div><button class="btn btn-primary btn-sm" (click)="saveSettings()">Save</button></div>
+        }
+      }
+    </main>
+    <div *ngIf="logsModal" class="modal-overlay" (click)="logsModal=null"><div class="modal" (click)="$event.stopPropagation()"><div class="modal-head"><b>Logs</b><button class="btn btn-ghost btn-sm" (click)="logsModal=null">✕</button></div><div class="log-body"><div *ngFor="let l of logLines" class="mono">{{l}}</div><div *ngIf="logLines.length===0" class="muted">No logs</div></div></div></div>
+    <div *ngIf="toastMsg" class="toast" [class.toast-err]="toastError" (click)="toastMsg=''">{{toastMsg}}</div>
+  }
+</div>
