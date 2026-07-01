@@ -2,6 +2,7 @@ import { Component, OnInit, signal, computed, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
+import * as QRCode from 'qrcode';
 
 interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; }
 interface DnsZone { id: string; name: string; }
@@ -105,7 +106,13 @@ export class AppComponent implements OnInit {
     try{ const t = this.tunnels().find(x=>x.tunnelId===tunnelId); const v = !(t?.serviceEnabled); await this.api('/api/tunnels/'+tunnelId+'/service','PUT',{enabled:v}); this.showToast(v?'Auto-start enabled for '+hostname:'Auto-start disabled'); this.refreshTunnels(); }catch{this.showToast('Error',true);}
   }
   async copyUrl(url:string) { try{await navigator.clipboard.writeText(url);this.showToast('Copied!');}catch{this.showToast('Copy failed',true);} }
-  showQr(url:string) { const qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=150x150&data='+encodeURIComponent(url); window.open(qrUrl,'_blank'); }
+  qrData = signal(''); qrDataUrl = signal('');
+  async showQr(url:string) {
+    this.qrData.set(url);
+    try { const dataUrl = await QRCode.toDataURL(url, {width:240,margin:2,color:{dark:'#0F172A',light:'#ffffff'}}); this.qrDataUrl.set(dataUrl); } catch { this.qrDataUrl.set(''); }
+  }
+  copyQrUrl() { navigator.clipboard.writeText(this.qrData()); this.showToast('URL copied!'); }
+  openUrl(url:string) { window.open(url,'_blank'); }
   private _tagColors: Record<string,string> = {
     prod:'#E53935',production:'#E53935',staging:'#FF8F00',dev:'#42A5F5',development:'#42A5F5',
     api:'#7C4DFF',internal:'#00ACC1',testing:'#43A047',monitoring:'#FDD835',backend:'#1E88E5',

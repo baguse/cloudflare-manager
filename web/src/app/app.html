@@ -81,6 +81,15 @@
         }
       }
     </main>
+    <div *ngIf="qrData()" class="modal-overlay" (click)="qrData.set('')"><div class="modal" (click)="$event.stopPropagation()" style="width:360px;text-align:center">
+      <div class="modal-head"><span class="material-icons" style="font-size:20px;color:var(--accent)">qr_code_2</span><b>Scan to open</b><button class="btn btn-ghost btn-sm" (click)="qrData.set('')"><span class="material-icons" style="font-size:18px">close</span></button></div>
+      <div style="background:#fff;border-radius:12px;padding:16px;display:inline-block;margin:8px 0"><img *ngIf="qrDataUrl()" [src]="qrDataUrl()" style="width:240px;height:240px" alt="QR"></div>
+      <div class="mono muted" style="word-break:break-all;margin:8px 0;max-width:100%">{{qrData()}}</div>
+      <div class="bind-row" style="justify-content:center">
+        <button class="btn btn-ghost btn-sm" (click)="copyQrUrl()"><span class="material-icons" style="font-size:16px">content_copy</span>Copy URL</button>
+        <button class="btn btn-primary btn-sm" (click)="openUrl(qrData())"><span class="material-icons" style="font-size:16px">open_in_new</span>Open</button>
+      </div>
+    </div></div>
     <div *ngIf="editingNotes" class="modal-overlay" (click)="editingNotes=null"><div class="modal" (click)="$event.stopPropagation()" style="width:480px">
       <div class="modal-head"><span class="material-icons" style="font-size:20px;color:var(--accent)">edit_note</span><b>Tunnel Notes &amp; Tags</b><button class="btn btn-ghost btn-sm" (click)="editingNotes=null"><span class="material-icons" style="font-size:18px">close</span></button></div>
       <label class="field-label">Notes</label>
