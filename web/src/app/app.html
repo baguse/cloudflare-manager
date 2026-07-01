@@ -60,7 +60,7 @@
         }
       }
     </main>
-    <div *ngIf="logsModal" class="modal-overlay" (click)="logsModal=null"><div class="modal" (click)="$event.stopPropagation()"><div class="modal-head"><b>Logs</b><button class="btn btn-ghost btn-sm" (click)="logsModal=null">✕</button></div><div class="log-body"><div *ngFor="let l of logLines" class="mono">{{l}}</div><div *ngIf="logLines.length===0" class="muted">No logs</div></div></div></div>
+    <div *ngIf="logsModal()" class="modal-overlay" (click)="logsModal.set(false)"><div class="modal" (click)="$event.stopPropagation()"><div class="modal-head"><b>Logs</b><button class="btn btn-ghost btn-sm" (click)="logsModal.set(false)">✕</button></div><div class="log-body"><div *ngFor="let l of logLines()" class="mono">{{l}}</div><div *ngIf="logLines().length===0" class="muted">No logs</div></div></div></div>
     <div *ngIf="toastMsg" class="toast" [class.toast-err]="toastError" (click)="toastMsg=''">{{toastMsg}}</div>
   }
 </div>

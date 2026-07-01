@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
@@ -36,10 +36,12 @@ export class AppComponent implements OnInit {
   backups: Backup[] = [];
   settings: any = {}; settingsKeys = () => Object.keys(this.settings);
   showBind = false; bind = {subdomain:'',zoneId:'',port:0};
-  logsModal: any = null; logLines: string[] = [];
+  logsModal = signal(false); logLines = signal<string[]>([]);
   toastMsg = ''; toastError = false;
 
   ngOnInit() { document.documentElement.className = 'dark'; if (this.configured()) { this.connected.set(true); this.refreshAll(); } }
+
+  constructor(private zone: NgZone) {}
 
   toggleTheme() { this.theme.set(this.theme()==='dark'?'light':'dark'); localStorage.setItem('cf_theme',this.theme()); document.documentElement.className=this.theme(); }
 
@@ -66,7 +68,7 @@ export class AppComponent implements OnInit {
   }
   async unbind(id:string) { if(!confirm('Unbind?'))return; try{await this.api('/api/tunnels/'+id,'DELETE');this.showToast('Unbound');this.refreshTunnels();}catch{this.showToast('Error',true);} }
   async deleteTunnel(id:string) { if(!confirm('Delete from Cloudflare?'))return; try{await this.api('/api/tunnels/'+id+'/delete','POST');this.showToast('Deleted');this.refreshTunnels();}catch{this.showToast('Error',true);} }
-  async showLogs(id:string) { this.logsModal=true;this.logLines=[];try{const r=await this.api('/api/logs/'+id+'?limit=100','GET');this.logLines=r.logs||[];}catch{this.logLines=['Error'];}}
+  async showLogs(id:string) { this.logsModal.set(true);this.logLines.set([]);try{const r=await this.api('/api/logs/'+id+'?limit=100','GET');this.logLines.set(r.logs||[]);}catch{this.logLines.set(['Error']);}}
 
   async loadZones() { try{const r=await this.api('/api/zones','GET');this.zones=r.zones||[];if(!this.dnsZone&&this.zones.length)this.dnsZone=this.zones[0].name;this.loadDns();}catch{} }
   async loadDns() { const z=this.zones.find(x=>x.name===this.dnsZone);if(!z)return;try{const r=await this.api('/api/dns?zoneId='+z.id,'GET');this.dnsRecords=r.records||[];}catch{} }
