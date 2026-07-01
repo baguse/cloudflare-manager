@@ -54,3 +54,7 @@ tr:hover td { background: var(--bg); }
 .danger { color: var(--red) !important; }
 .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 13px; z-index: 200; cursor: pointer; background: #059669; }
 .toast-err { background: var(--red); }
+.loading-bar { height: 2px; background: var(--accent); animation: load-slide 1.5s ease-in-out infinite; position: relative; overflow: hidden; }
+.loading-bar::after { content:''; position:absolute; top:0; left:0; right:0; bottom:0; background: linear-gradient(90deg,transparent,var(--accent),transparent); animation: load-shimmer 1s ease-in-out infinite; }
+@keyframes load-slide { 0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%} }
+@keyframes load-shimmer { 0%{transform:translateX(-100%)}100%{transform:translateX(100%)} }

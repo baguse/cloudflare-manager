@@ -40,6 +40,7 @@ export class AppComponent implements OnInit {
   toastMsg = ''; toastError = false;
   editingNotes: string|null = null; notesText = '';
   watcherEnabled = true; daemonRunning = false;
+  refreshing = signal(false);
 
   ngOnInit() { document.documentElement.className = 'dark'; if (this.configured()) { this.connected.set(true); this.refreshAll(); } }
 
@@ -58,9 +59,9 @@ export class AppComponent implements OnInit {
     return res.json();
   }
 
-  async refreshAll() { this.refreshTunnels(); this.loadZones(); this.loadWebhooks(); this.loadAlerts(); this.loadSettings(); }
+  async refreshAll() { this.refreshing.set(true); await this.refreshTunnels(); await this.loadZones(); await this.loadWebhooks(); await this.loadAlerts(); await this.loadSettings(); this.refreshing.set(false); }
 
-  async refreshTunnels() { try { const r = await this.api('/api/status','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch { this.connected.set(false); } }
+  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/status','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch { this.connected.set(false); } finally { this.refreshing.set(false); } }
   stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':'badge-gray'; }
 
   async quickBind() {
