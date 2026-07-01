@@ -17,8 +17,10 @@ class HttpApiServer {
   final int port;
   final String apiKey;
   HttpServer? _server;
+  Future<Map<String, dynamic>> Function()? onGetStatusDirect;
+  Future<Map<String, dynamic>> Function(String cmd, Map<String, dynamic>? args)? onIpcCall;
 
-  HttpApiServer({this.port = 9845, required this.apiKey});
+  HttpApiServer({this.port = 9845, required this.apiKey, this.onGetStatusDirect, this.onIpcCall});
 
   Future<void> start() async {
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
@@ -34,6 +36,15 @@ class HttpApiServer {
     await _server?.close(force: true);
     _server = null;
     print('[api] HTTP API stopped');
+  }
+
+  Future<Map<String, dynamic>> _ipc(String cmd, {Map<String, dynamic>? args}) async {
+    if (onIpcCall != null) return await onIpcCall!(cmd, args);
+    final client = DaemonClient();
+    if (!await client.connect()) return {'ok': false, 'error': 'Daemon not running'};
+    final result = await client.send(cmd, args: args);
+    client.disconnect();
+    return result;
   }
 
   void _handleRequest(HttpRequest request) async {
@@ -204,37 +215,34 @@ class HttpApiServer {
   }
 
   Future<void> _handleStatus(HttpResponse response) async {
-    final client = DaemonClient();
-    try {
-      if (!await client.connect()) {
-        _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon not running'});
-        return;
-      }
-      final result = await client.getStatus();
-      client.disconnect();
-      if (result['ok'] == true) {
-        _jsonResponse(response, 200, result);
-      } else {
-        _jsonResponse(response, 500, result);
-      }
-    } catch (e) {
-      _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon unreachable: $e'});
+    if (onGetStatusDirect != null) {
+      _jsonResponse(response, 200, await onGetStatusDirect!());
+      return;
+    }
+    final result = await _ipc('status');
+    if (result['ok'] == true) {
+      _jsonResponse(response, 200, result);
+    } else {
+      final socketExists = File(_socketPath).existsSync();
+      _jsonResponse(response, 200, {
+        'ok': true,
+        'apiRunning': true,
+        'daemonRunning': socketExists,
+        'daemonSocket': socketExists ? _socketPath : '(not found)',
+        'note': socketExists ? 'Daemon is running but IPC failed' : 'API running standalone — daemon not detected',
+        'tunnels': const [],
+      });
     }
   }
 
+  String get _socketPath {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    return '$home/.cloudflared/cloudflare-manager.sock';
+  }
+
   Future<void> _handleListTunnels(HttpResponse response) async {
-    final client = DaemonClient();
-    try {
-      if (!await client.connect()) {
-        _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon not running'});
-        return;
-      }
-      final result = await client.getTunnelList();
-      client.disconnect();
-      _jsonResponse(response, result['ok'] == true ? 200 : 500, result);
-    } catch (e) {
-      _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon unreachable: $e'});
-    }
+    final result = await _ipc('tunnel_list');
+    _jsonResponse(response, result['ok'] == true ? 200 : 500, result);
   }
 
   Future<void> _handleBindTunnel(HttpRequest request) async {
@@ -244,95 +252,28 @@ class HttpApiServer {
     final token = data['token'] as String?;
     final hostname = data['hostname'] as String? ?? '';
     final port = data['port'] as int?;
-
     if (tunnelId == null || token == null || port == null) {
       _jsonResponse(request.response, 400, {'ok': false, 'error': 'Missing required fields: tunnelId, token, port'});
       return;
     }
-
-    final client = DaemonClient();
-    try {
-      if (!await client.connect()) {
-        _jsonResponse(request.response, 503, {'ok': false, 'error': 'Daemon not running'});
-        return;
-      }
-      final result = await client.bindTunnel(tunnelId, token, hostname, port);
-      client.disconnect();
-      _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
-    } catch (e) {
-      _jsonResponse(request.response, 503, {'ok': false, 'error': 'Daemon unreachable: $e'});
-    }
+    final result = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': token, 'hostname': hostname, 'port': port});
+    _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
   }
 
   Future<void> _handleUnbindTunnel(String tunnelId, HttpResponse response) async {
-    final client = DaemonClient();
-    try {
-      if (!await client.connect()) {
-        _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon not running'});
-        return;
-      }
-      final result = await client.unbindTunnel(tunnelId);
-      client.disconnect();
-      _jsonResponse(response, result['ok'] == true ? 200 : 404, result);
-    } catch (e) {
-      _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon unreachable: $e'});
-    }
+    final result = await _ipc('tunnel_unbind', args: {'tunnelId': tunnelId});
+    _jsonResponse(response, result['ok'] == true ? 200 : 404, result);
   }
 
   Future<void> _handleTunnelLogs(String tunnelId, String? limitStr, HttpResponse response) async {
     final limit = int.tryParse(limitStr ?? '50') ?? 50;
-    final client = DaemonClient();
-    try {
-      if (!await client.connect()) {
-        _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon not running'});
-        return;
-      }
-      final result = await client.getTunnelLogs(tunnelId, limit: limit);
-      client.disconnect();
-      _jsonResponse(response, result['ok'] == true ? 200 : 404, result);
-    } catch (e) {
-      _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon unreachable: $e'});
-    }
+    final result = await _ipc('tunnel_logs', args: {'tunnelId': tunnelId, 'limit': limit});
+    _jsonResponse(response, result['ok'] == true ? 200 : 404, result);
   }
 
   Future<void> _handleReloadWebhooks(HttpResponse response) async {
-    final client = DaemonClient();
-    try {
-      if (!await client.connect()) {
-        _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon not running'});
-        return;
-      }
-      final result = await client.reloadWebhooks();
-      client.disconnect();
-      _jsonResponse(response, result['ok'] == true ? 200 : 500, result);
-    } catch (e) {
-      _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon unreachable: $e'});
-    }
-  }
-
-  Future<void> _handleZones(HttpResponse response) async {
-    final zones = await CfApiClient.getZones();
-    final simplified = zones.map((z) => {'id': z['id'], 'name': z['name']}).toList();
-    _jsonResponse(response, 200, {'ok': true, 'zones': simplified});
-  }
-
-  Future<void> _handleCfConfig(HttpRequest request) async {
-    final body = await utf8.decodeStream(request);
-    final data = json.decode(body) as Map<String, dynamic>;
-    final token = data['token'] as String?;
-    final accountId = data['accountId'] as String?;
-    if (token == null || accountId == null) {
-      _jsonResponse(request.response, 400, {'ok': false, 'error': 'token and accountId required'});
-      return;
-    }
-    await CfApiClient.setToken(token);
-    await CfApiClient.setAccountId(accountId);
-    _jsonResponse(request.response, 200, {'ok': true});
-  }
-
-  Future<void> _handleCfConfigStatus(HttpResponse response) async {
-    final token = await CfApiClient.getToken();
-    _jsonResponse(response, 200, {'ok': true, 'configured': token != null && token.isNotEmpty});
+    final result = await _ipc('reload_webhooks');
+    _jsonResponse(response, result['ok'] == true ? 200 : 500, result);
   }
 
   Future<void> _handleQuickBind(HttpRequest request) async {
@@ -385,14 +326,7 @@ class HttpApiServer {
     }
 
     // 4. Bind via daemon
-    final client = DaemonClient();
-    if (!await client.connect()) {
-      _jsonResponse(request.response, 500, {'ok': false, 'error': 'Daemon not running — tunnel created but not bound'});
-      return;
-    }
-    final bindResult = await client.bindTunnel(tunnelId, tunnelToken, hostname, port);
-    client.disconnect();
-
+    final bindResult = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': tunnelToken, 'hostname': hostname, 'port': port});
     if (bindResult['ok'] == true) {
       _jsonResponse(request.response, 200, {
         'ok': true,
@@ -652,6 +586,29 @@ class HttpApiServer {
     final dnsOk = await CloudflareService.deleteTunnelDnsRecords(tunnelId);
     final tunnelOk = await CloudflareService.deleteTunnel(tunnelId);
     _jsonResponse(response, 200, {'ok': tunnelOk, 'dnsDeleted': dnsOk});
+  }
+
+  Future<void> _handleZones(HttpResponse response) async {
+    final zones = await CfApiClient.getZones();
+    _jsonResponse(response, 200, {'ok': true, 'zones': zones.map((z) => {'id': z['id'], 'name': z['name']}).toList()});
+  }
+
+  Future<void> _handleCfConfig(HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final token = body['token'] as String?;
+    final accountId = body['accountId'] as String?;
+    if (token == null || accountId == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'token and accountId required'});
+      return;
+    }
+    await CfApiClient.setToken(token);
+    await CfApiClient.setAccountId(accountId);
+    _jsonResponse(request.response, 200, {'ok': true});
+  }
+
+  Future<void> _handleCfConfigStatus(HttpResponse response) async {
+    final token = await CfApiClient.getToken();
+    _jsonResponse(response, 200, {'ok': true, 'configured': token != null && token.isNotEmpty});
   }
 
   void _jsonResponse(HttpResponse response, int status, Map<String, dynamic> data) {

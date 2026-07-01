@@ -107,9 +107,13 @@ class TunnelServiceManager {
     if (Platform.isLinux) {
       final dir = Directory(_serviceFileDir);
       if (!await dir.exists()) await dir.create(recursive: true);
-      final useDart = await File(cliScript).exists();
+      final installedBinary = '/usr/lib/cloudflare-manager/cloudflare_manager';
+      final installedExists = await File(installedBinary).exists();
+
       String execLine;
-      if (useDart) {
+      if (installedExists) {
+        execLine = '$installedBinary daemon start';
+      } else if (await File(cliScript).exists()) {
         final dartExe = await _findDart();
         execLine = '$dartExe run $cliScript daemon start';
       } else {
@@ -125,13 +129,14 @@ class TunnelServiceManager {
     if (Platform.isMacOS) {
       final dir = Directory(_serviceFileDir);
       if (!await dir.exists()) await dir.create(recursive: true);
-      final useDart = await File(cliScript).exists();
-      _log('[svc] installService: useDart=$useDart');
+      final installedBinary = '/usr/local/lib/cloudflare-manager/cloudflare_manager';
+
       String execLine;
-      if (useDart) {
+      if (await File(installedBinary).exists()) {
+        execLine = '$installedBinary daemon start';
+      } else if (await File(cliScript).exists()) {
         final dartExe = await _findDart();
         execLine = '$dartExe run $cliScript daemon start';
-        _log('[svc] installService: dartExe=$dartExe');
       } else {
         execLine = '$exe daemon start';
       }

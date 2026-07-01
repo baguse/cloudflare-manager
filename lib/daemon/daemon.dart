@@ -220,7 +220,76 @@ class CloudflareDaemon {
     final portStr = await AppStorage.instance.read(key: 'api_port');
     final port = int.tryParse(portStr ?? '9845') ?? 9845;
     try {
-      _apiServer = HttpApiServer(port: port, apiKey: apiKey);
+      _apiServer = HttpApiServer(port: port, apiKey: apiKey,
+        onGetStatusDirect: () async {
+          return {
+            'ok': true,
+            'running': _running,
+            'tunnels': _runners.values.map((r) => r.toJson()).toList(),
+            'eventCount': _eventLog.length,
+          };
+        },
+        onIpcCall: (String cmd, Map<String, dynamic>? args) async {
+          switch (cmd) {
+            case 'status':
+              return {
+                'ok': true, 'running': _running,
+                'tunnels': _runners.values.map((r) => r.toJson()).toList(),
+                'eventCount': _eventLog.length,
+              };
+            case 'tunnel_bind':
+              final id = args?['tunnelId'] as String?;
+              final token = args?['token'] as String?;
+              final hostname = args?['hostname'] as String? ?? '';
+              final port = args?['port'] as int?;
+              if (id == null || token == null || port == null) {
+                return {'ok': false, 'error': 'Missing tunnelId, token, or port'};
+              }
+              if (_runners.containsKey(id)) { await _runners[id]!.stop(); }
+              final runner = TunnelRunner(tunnelId: id, token: token, hostname: hostname, port: port, onEvent: _emit, maxRestarts: _maxStartRetries);
+              _runners[id] = runner;
+              await runner.start();
+              return {'ok': true, 'pid': runner.pid};
+            case 'tunnel_list':
+              return {'ok': true, 'tunnels': _runners.values.map((r) => r.toJson()).toList()};
+            case 'tunnel_bind':
+            case 'tunnel_logs':
+              final id = args?['tunnelId'] as String?;
+              final limit = args?['limit'] as int? ?? 50;
+              final runner = id != null ? _runners[id] : null;
+              if (runner != null) {
+                return {'ok': true, 'logs': runner.logs.reversed.take(limit).toList().reversed.toList()};
+              }
+              return {'ok': false, 'error': 'tunnel not found'};
+            case 'tunnel_start':
+              final id = args?['tunnelId'] as String?;
+              if (id != null && _runners.containsKey(id)) {
+                try { await _runners[id]!.start(); return {'ok': true}; } catch (e) { return {'ok': false, 'error': e.toString()}; }
+              }
+              return {'ok': false, 'error': 'tunnel not found'};
+            case 'tunnel_stop':
+              final id = args?['tunnelId'] as String?;
+              if (id != null && _runners.containsKey(id)) {
+                await _runners[id]!.stop(); return {'ok': true};
+              }
+              return {'ok': false, 'error': 'tunnel not found'};
+            case 'tunnel_unbind':
+              final id = args?['tunnelId'] as String?;
+              if (id != null && _runners.containsKey(id)) {
+                await _runners[id]!.stop(); _runners.remove(id); return {'ok': true};
+              }
+              return {'ok': false, 'error': 'tunnel not found'};
+            case 'shutdown':
+              await stop();
+              return {'ok': true};
+            case 'reload_webhooks':
+              await WebhookService.instance.loadWebhooks();
+              return {'ok': true, 'count': WebhookService.instance.webhooks.length};
+            default:
+              return {'ok': false, 'error': 'unknown command: $cmd'};
+          }
+        },
+      );
       await _apiServer!.start();
       _log('[daemon] HTTP API started on port $port');
     } catch (e) {
