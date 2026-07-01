@@ -314,11 +314,12 @@ class HttpApiServer {
     final cfg = fullMap[tunnelId];
     final token = cfg?.token;
     final port = cfg?.port ?? 0;
+    final hostname = cfg?.hostname ?? '';
     if (token == null && !await CloudflaredService.credentialsFileExists(tunnelId)) {
       _jsonResponse(request.response, 400, {'ok':false,'error':'No stored credentials for this tunnel'});
       return;
     }
-    final result = await _ipc('tunnel_bind', args: {'tunnelId':tunnelId, 'token':token??'', 'hostname':'', 'port':port});
+    final result = await _ipc('tunnel_bind', args: {'tunnelId':tunnelId, 'token':token??'', 'hostname':hostname, 'port':port});
     _jsonResponse(request.response, result['ok']==true?200:500, result);
   }
 
