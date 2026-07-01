@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'app_storage.dart';
+import 'dart:math';
 import 'cloudflare_service.dart';
 import 'daemon/cf_api_client.dart';
+import 'daemon/http_api.dart';
+import 'daemon/ipc_client.dart';
 import 'tray_service.dart';
+import 'app_storage.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onPortRangeChanged;
@@ -31,10 +34,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _closeToTray = false;
   bool _autoStart = false;
 
+  String? _apiKey;
+  int _apiPort = 9845;
+  bool _apiEnabled = false;
+  HttpApiServer? _apiServer;
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  Future<void> _loadApiConfig() async {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final keyFile = File('$home/.cloudflared/api-key');
+    if (await keyFile.exists()) {
+      _apiKey = (await keyFile.readAsString()).trim();
+    }
+    if (_apiKey == null || _apiKey!.isEmpty) {
+      _apiKey = 'cm_${_randomString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+      await keyFile.parent.create(recursive: true);
+      await keyFile.writeAsString(_apiKey!);
+    }
+    final portStr = await _storage.read(key: 'api_port');
+    if (portStr != null) _apiPort = int.tryParse(portStr) ?? 9845;
+    final enabled = await _storage.read(key: 'api_enabled');
+    _apiEnabled = enabled == 'true';
+  }
+
+  String _randomString(int length) {
+    final r = Random();
+    return String.fromCharCodes(List.generate(length, (_) => r.nextInt(26) + 97));
+  }
+
+  Future<void> _toggleApi(bool enabled) async {
+    setState(() => _apiEnabled = enabled);
+    await _storage.write(key: 'api_enabled', value: enabled.toString());
+    try {
+      final client = DaemonClient();
+      if (await client.connect()) {
+        await client.send('api_restart');
+        client.disconnect();
+        _showSnack(enabled ? 'API server will restart via daemon' : 'API settings saved', Colors.grey);
+        return;
+      }
+    } catch (_) {}
+    if (enabled) {
+      try {
+        _apiServer = HttpApiServer(port: _apiPort, apiKey: _apiKey!);
+        await _apiServer!.start();
+        _showSnack('API server running on port $_apiPort');
+      } catch (e) {
+        setState(() => _apiEnabled = false);
+        _showSnack('Failed to start API server: $e', Colors.redAccent);
+      }
+    } else {
+      await _apiServer?.stop();
+      _apiServer = null;
+      _showSnack('API server stopped', Colors.grey);
+    }
+  }
+
+  void _showSnack(String msg, [Color color = Colors.green]) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating),
+    );
   }
 
   Future<void> _loadSettings() async {
@@ -60,6 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _autoStart = autoStart == 'true';
 
     await _loadDaemonConfig();
+    await _loadApiConfig();
 
     setState(() => _isLoading = false);
   }
@@ -298,6 +364,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 32),
+                  const Text('HTTP API Server',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    title: const Text('Enable HTTP API', style: TextStyle(fontSize: 14)),
+                    subtitle: Text('Expose app features over HTTP on port $_apiPort', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                    value: _apiEnabled,
+                    activeThumbColor: const Color(0xFFF6821F),
+                    onChanged: (v) => _toggleApi(v),
+                  ),
+                  if (_apiEnabled && _apiKey != null) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: SelectableText(
+                              'API Key: $_apiKey',
+                              style: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace'),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 16, color: Colors.grey),
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: _apiKey!));
+                              _showSnack('API key copied', Colors.grey);
+                            },
+                            tooltip: 'Copy API key',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'curl -H "Authorization: Bearer $_apiKey" http://localhost:$_apiPort/health',
+                        style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: 'monospace'),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 32),
                   SizedBox(
                     width: double.infinity,

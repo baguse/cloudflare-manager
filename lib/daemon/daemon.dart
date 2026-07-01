@@ -6,6 +6,8 @@ import 'events.dart';
 import 'tunnel_runner.dart';
 import '../webhook_service.dart';
 import '../cloudflared_service.dart';
+import 'http_api.dart';
+import '../app_storage.dart';
 
 const _debugPrint = !bool.fromEnvironment('dart.vm.product');
 
@@ -23,6 +25,7 @@ class CloudflareDaemon {
   bool _running = false;
   final Completer<void> _shutdownCompleter = Completer<void>();
   final Set<Future<void>> _pendingWebhooks = {};
+  HttpApiServer? _apiServer;
 
   static const _socketName = 'cloudflare-manager.sock';
 
@@ -98,6 +101,7 @@ class CloudflareDaemon {
 
     await _startIpcServer();
     await _loadTunnels();
+    await _startApiIfEnabled();
 
     _log('[daemon] Started, managing ${_runners.length} tunnel(s), max retries=$_maxStartRetries');
     _log('[daemon] IPC socket: $socketPath]');
@@ -115,6 +119,8 @@ class CloudflareDaemon {
     _runners.clear();
 
     await _flushWebhooks();
+    await _apiServer?.stop();
+    _apiServer = null;
 
     for (final client in _ipcClients) {
       await client.close();
@@ -199,6 +205,27 @@ class CloudflareDaemon {
         onDone: () => _ipcClients.remove(client),
       );
     });
+  }
+
+  Future<void> _startApiIfEnabled() async {
+    final enabled = await AppStorage.instance.read(key: 'api_enabled');
+    if (enabled != 'true') return;
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final keyFile = File('$home/.cloudflared/api-key');
+    String? apiKey;
+    if (await keyFile.exists()) {
+      apiKey = (await keyFile.readAsString()).trim();
+    }
+    if (apiKey == null || apiKey.isEmpty) return;
+    final portStr = await AppStorage.instance.read(key: 'api_port');
+    final port = int.tryParse(portStr ?? '9845') ?? 9845;
+    try {
+      _apiServer = HttpApiServer(port: port, apiKey: apiKey);
+      await _apiServer!.start();
+      _log('[daemon] HTTP API started on port $port');
+    } catch (e) {
+      _log('[daemon] Failed to start HTTP API: $e');
+    }
   }
 
   Future<void> _handleIpcMessage(Socket client, String message) async {
@@ -324,6 +351,13 @@ class CloudflareDaemon {
           }).catchError((e) {
             _sendIpc(client, {'ok': false, 'error': e.toString()});
           });
+          break;
+
+        case 'api_restart':
+          _apiServer?.stop();
+          _apiServer = null;
+          await _startApiIfEnabled();
+          _sendIpc(client, {'ok': true, 'running': _apiServer != null});
           break;
 
         default:
