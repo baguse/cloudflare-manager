@@ -35,16 +35,20 @@
           }
           <div class="stats-row"><div class="stat"><span class="stat-num">{{tunnels().length}}</span><span class="stat-label">Tunnels</span></div><div class="stat"><span class="stat-num green">{{runningCount()}}</span><span class="stat-label">Running</span></div><div class="stat"><span class="stat-num red">{{crashedCount()}}</span><span class="stat-label">Crashed</span></div><div class="stat"><span class="stat-num muted">{{stoppedCount()}}</span><span class="stat-label">Stopped</span></div></div>
           <div class="card">
-            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th style="width:220px">Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td>                <td>{{t.hostname||'-'}}
+            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th>Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td>                <td>{{t.hostname||'-'}}
                   <span *ngFor="let tag of splitTags(t.tags)" class="tag-chip" [ngStyle]="getTagStyle(tag)">{{tag}}</span>
-                  <span *ngIf="t.notes" class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span><td class="muted">{{t.port||'-'}}</td><td class="action-cell">
+                  <span *ngIf="t.notes" class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span><td class="muted">{{t.state==='inactive'?t.service||'-':(t.port||'-')}}</td><td class="action-cell">
                       <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)"><span class="material-icons" style="font-size:16px">edit_note</span></button>
-                      <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)"
-                        [style.color]="t.serviceEnabled?'var(--green)':''"><span class="material-icons" style="font-size:16px">shield</span></button>
-                      <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl(t.hostname?'https://'+t.hostname:'')"><span class="material-icons" style="font-size:16px">content_copy</span></button>
-                      <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr(t.hostname?'https://'+t.hostname:'')"><span class="material-icons" style="font-size:16px">qr_code</span></button>
-                      <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)"><span class="material-icons" style="font-size:16px">terminal</span></button>
-                      <button class="btn btn-ghost btn-xs" title="Stop" (click)="unbind(t.tunnelId)"><span class="material-icons" style="font-size:16px">stop_circle</span></button>
+                      @if (t.state!=='inactive') {
+                        <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)" [style.color]="t.serviceEnabled?'var(--green)':''"><span class="material-icons" style="font-size:16px">shield</span></button>
+                        <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl('https://'+(t.hostname||''))"><span class="material-icons" style="font-size:16px">content_copy</span></button>
+                        <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                        <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)"><span class="material-icons" style="font-size:16px">terminal</span></button>
+                        <button class="btn btn-ghost btn-xs" title="Stop" (click)="unbind(t.tunnelId)"><span class="material-icons" style="font-size:16px">stop_circle</span></button>
+                      } @else {
+                        <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                        <button class="btn btn-primary btn-xs" (click)="quickBindExisting(t.tunnelId)">Bind</button>
+                      }
                       <button class="btn btn-ghost btn-xs danger" title="Delete" (click)="deleteTunnel(t.tunnelId)"><span class="material-icons" style="font-size:16px">delete_outline</span></button>
                     </td></tr></tbody></table>
             <div *ngIf="tunnels().length===0" class="empty">No tunnels yet.</div>

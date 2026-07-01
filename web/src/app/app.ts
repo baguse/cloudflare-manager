@@ -4,7 +4,7 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import * as QRCode from 'qrcode';
 
-interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; }
+interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; service?:string; }
 interface DnsZone { id: string; name: string; }
 interface DnsRecord { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean; }
 interface WebhookConfig { id: string; name: string; type: string; enabled: boolean; triggers: string[]; url?: string; }
@@ -63,13 +63,16 @@ export class AppComponent implements OnInit {
 
   async refreshAll() { this.refreshing.set(true); await this.refreshTunnels(); await this.loadZones(); await this.loadWebhooks(); await this.loadAlerts(); await this.loadSettings(); this.refreshing.set(false); }
 
-  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/status','GET'); this.tunnels.set((r.tunnels||[]).map((t:any)=>({...t,notes:t.notes||'',tags:t.tags||''}))); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch { this.connected.set(false); } finally { this.refreshing.set(false); } }
-  stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':'badge-gray'; }
+  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/tunnels/all','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch (e) { this.connected.set(false); this.tunnels.set([]); } finally { this.refreshing.set(false); } }
+  stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':s==='inactive'?'badge-gray':'badge-gray'; }
 
   async quickBind() {
     const z = this.zones.find(x=>x.id===this.bind.zoneId);
     if(!this.bind.subdomain||!this.bind.zoneId||!this.bind.port||!z) return this.showToast('All fields required',true);
     try{const r=await this.api('/api/bind','POST',{subdomain:this.bind.subdomain,zoneId:this.bind.zoneId,zoneName:z.name,port:+this.bind.port});this.showToast('Bound: '+r.url);this.showBind=false;this.refreshTunnels();}catch(e:any){this.showToast('Bind failed: '+(e.error||e.message),true);}
+  }
+  async quickBindExisting(tunnelId:string) {
+    try{const r=await this.api('/api/tunnels/'+tunnelId+'/bind','POST');this.showToast('Tunnel bound');this.refreshTunnels();}catch(e:any){this.showToast('Bind failed: '+(e.error||e.message),true);}
   }
   async unbind(id:string) { if(!confirm('Unbind?'))return; try{await this.api('/api/tunnels/'+id,'DELETE');this.showToast('Unbound');this.refreshTunnels();}catch{this.showToast('Error',true);} }
   async deleteTunnel(id:string) { if(!confirm('Delete from Cloudflare?'))return; try{await this.api('/api/tunnels/'+id+'/delete','POST');this.showToast('Deleted');this.refreshTunnels();}catch{this.showToast('Error',true);} }

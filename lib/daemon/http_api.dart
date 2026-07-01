@@ -103,6 +103,9 @@ class HttpApiServer {
         case 'GET /status':
           await _handleStatus(request.response);
           break;
+        case 'GET /tunnels/all':
+          await _handleListAllTunnels(request.response);
+          break;
         case 'GET /tunnels':
           await _handleListTunnels(request.response);
           break;
@@ -117,6 +120,9 @@ class HttpApiServer {
           break;
         case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/service') && method == 'PUT':
           await _handleToggleService(segments[1], request);
+          break;
+        case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/bind') && method == 'POST':
+          await _handleBindExisting(segments[1], request);
           break;
         case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/delete') && method == 'POST':
           await _handleDeleteTunnel(segments[1], request.response);
@@ -246,9 +252,74 @@ class HttpApiServer {
     return '$home/.cloudflared/cloudflare-manager.sock';
   }
 
+  Future<void> _handleListAllTunnels(HttpResponse response) async {
+    final daemonResult = await _ipc('tunnel_list');
+    final daemonTunnels = (daemonResult['tunnels'] as List?)?.cast<Map<String,dynamic>>() ?? [];
+
+    final cfTunnels = await CloudflareService.listTunnels();
+    final cfConfigs = <String, Map<String,String>>{};
+    for (final t in cfTunnels) {
+      final id = t['id'] as String? ?? '';
+      final cfg = await CloudflareService.getTunnelConfig(id);
+      if (cfg != null) {
+        final ingress = cfg['config']?['ingress'] as List?;
+        if (ingress != null && ingress.isNotEmpty) {
+          final first = ingress.first as Map<String,dynamic>;
+          cfConfigs[id] = {'hostname': first['hostname']??'', 'service': first['service']??''};
+        }
+      }
+    }
+
+    final all = <Map<String,dynamic>>[];
+    final seen = <String>{};
+    for (final d in daemonTunnels) {
+      final id = d['tunnelId'] as String? ?? '';
+      seen.add(id);
+      all.add({...d, 'source': 'daemon'});
+    }
+    for (final t in cfTunnels) {
+      final id = t['id'] as String? ?? '';
+      if (seen.contains(id)) continue;
+      final cfg = cfConfigs[id] ?? <String,String>{};
+      all.add({
+        'tunnelId': id,
+        'name': t['name'] ?? '',
+        'hostname': cfg['hostname'] ?? '',
+        'port': 0,
+        'state': 'inactive',
+        'source': 'cloudflare',
+        'status': t['status'] ?? 'inactive',
+        'service': cfg['service'] ?? '',
+      });
+    }
+
+    final notesMap = await CloudflaredService.readAllTunnelNotes();
+    for (final t in all) {
+      final n = notesMap[t['tunnelId'] as String? ?? ''];
+      if (n?.notes != null) t['notes'] = n!.notes;
+      if (n?.tags != null) t['tags'] = n!.tags;
+      t['serviceEnabled'] = n?.serviceEnabled == true;
+    }
+
+    _jsonResponse(response, 200, {'ok': true, 'tunnels': all});
+  }
+
   Future<void> _handleListTunnels(HttpResponse response) async {
     final result = await _ipc('tunnel_list');
     _jsonResponse(response, result['ok'] == true ? 200 : 500, result);
+  }
+
+  Future<void> _handleBindExisting(String tunnelId, HttpRequest request) async {
+    final fullMap = await CloudflaredService.readAppTunnelPortMapFull();
+    final cfg = fullMap[tunnelId];
+    final token = cfg?.token;
+    final port = cfg?.port ?? 0;
+    if (token == null && !await CloudflaredService.credentialsFileExists(tunnelId)) {
+      _jsonResponse(request.response, 400, {'ok':false,'error':'No stored credentials for this tunnel'});
+      return;
+    }
+    final result = await _ipc('tunnel_bind', args: {'tunnelId':tunnelId, 'token':token??'', 'hostname':'', 'port':port});
+    _jsonResponse(request.response, result['ok']==true?200:500, result);
   }
 
   Future<void> _handleBindTunnel(HttpRequest request) async {
