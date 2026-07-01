@@ -22,7 +22,7 @@ export class AppComponent implements OnInit {
   configured = computed(() => !!this.apiUrl() && !!this.apiKey());
   theme = signal(localStorage.getItem('cf_theme')||'dark');
   activeTab = signal('tunnels');
-  tabs = [{id:'tunnels',icon:'📡',label:'Tunnels'},{id:'dns',icon:'🌐',label:'DNS'},{id:'webhooks',icon:'🔔',label:'Webhooks'},{id:'alerts',icon:'📊',label:'Alerts'},{id:'backup',icon:'💾',label:'Backup'},{id:'settings',icon:'⚙',label:'Settings'}];
+  tabs = [{id:'tunnels',icon:'dashboard',label:'Dashboard'},{id:'dns',icon:'dns',label:'DNS Editor'},{id:'webhooks',icon:'webhook',label:'Webhooks'},{id:'alerts',icon:'speed',label:'Rate Alerts'},{id:'backup',icon:'backup',label:'Backup & Restore'},{id:'settings',icon:'settings',label:'Settings'}];
   connected = signal(false);
   connDot = () => this.connected()?'dot-green':'dot-red';
   connLabel = () => this.connected()?'Connected':'Disconnected';
@@ -38,6 +38,8 @@ export class AppComponent implements OnInit {
   showBind = false; bind = {subdomain:'',zoneId:'',port:0};
   logsModal = signal(false); logLines = signal<string[]>([]);
   toastMsg = ''; toastError = false;
+  editingNotes: string|null = null; notesText = '';
+  watcherEnabled = true; daemonRunning = false;
 
   ngOnInit() { document.documentElement.className = 'dark'; if (this.configured()) { this.connected.set(true); this.refreshAll(); } }
 
@@ -58,7 +60,7 @@ export class AppComponent implements OnInit {
 
   async refreshAll() { this.refreshTunnels(); this.loadZones(); this.loadWebhooks(); this.loadAlerts(); this.loadSettings(); }
 
-  async refreshTunnels() { try { const r = await this.api('/api/status','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); } catch { this.connected.set(false); } }
+  async refreshTunnels() { try { const r = await this.api('/api/status','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch { this.connected.set(false); } }
   stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':'badge-gray'; }
 
   async quickBind() {
@@ -90,6 +92,28 @@ export class AppComponent implements OnInit {
 
   async loadSettings() { try{const r=await this.api('/api/settings','GET');this.settings=r.settings||{};}catch{} }
   async saveSettings() { try{await this.api('/api/settings','PATCH',this.settings);this.showToast('Saved');}catch{this.showToast('Error',true);} }
+
+  async saveNotes() { if(!this.editingNotes)return; try{await this.api('/api/settings','PATCH',{[`tunnel_${this.editingNotes}_notes`]:this.notesText});this.showToast('Saved');this.editingNotes=null;}catch{this.showToast('Error',true);} }
+  async toggleService(tunnelId:string,hostname:string) {
+    try{
+      const r=await this.api('/api/settings','GET');
+      const s=r.settings||{};
+      const k=`service_${tunnelId}`;
+      const v=s[k]==='true'?'false':'true';
+      await this.api('/api/settings','PATCH',{[k]:v});
+      this.showToast(v==='true'?'Auto-start enabled for '+hostname:'Auto-start disabled');
+      this.refreshTunnels();
+    }catch{this.showToast('Error',true);}
+  }
+  async copyUrl(url:string) { try{await navigator.clipboard.writeText(url);this.showToast('Copied!');}catch{this.showToast('Copy failed',true);} }
+  showQr(url:string) { const qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=150x150&data='+encodeURIComponent(url); window.open(qrUrl,'_blank'); }
+  toggleWatcher() { this.watcherEnabled=!this.watcherEnabled; this.showToast('Watcher '+(this.watcherEnabled?'enabled':'disabled')); }
+  async killDaemons() { if(!confirm('Kill all cloudflared processes?'))return; try{await this.api('/api/daemon/stop','POST');this.showToast('Daemon killed');}catch{this.showToast('Error',true);} }
+  async startDaemon() { try{await this.api('/api/daemon/start','POST');this.showToast('Daemon starting...');this.daemonRunning=true;}catch{this.showToast('Error',true);} }
+  async stopDaemon() { if(!confirm('Stop daemon?'))return; try{await this.api('/api/daemon/stop','POST');this.showToast('Daemon stopped');this.daemonRunning=false;}catch{this.showToast('Error',true);} }
+  async getServiceState(tunnelId:string): Promise<boolean> {
+    try{const r=await this.api('/api/settings','GET');return (r.settings||{})['service_'+tunnelId]==='true';}catch{return false;}
+  }
 
   showToast(msg:string,err=false) { this.toastMsg=msg;this.toastError=err;setTimeout(()=>this.toastMsg='',3000); }
 }

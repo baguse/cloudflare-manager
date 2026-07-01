@@ -11,7 +11,16 @@
   } @else {
     <aside class="sidebar">
       <div class="brand">CF Manager</div>
-      <div *ngFor="let t of tabs" class="sidebar-item" [class.active]="activeTab()===t.id" (click)="activeTab.set(t.id)">{{t.icon}} {{t.label}}</div>
+      <div *ngFor="let t of tabs" class="sidebar-item" [class.active]="activeTab()===t.id" (click)="activeTab.set(t.id)"><span class="material-icons" style="font-size:18px;width:18px">{{t.icon}}</span>{{t.label}}</div>
+      <div class="sidebar-item" (click)="toggleWatcher()"><span class="material-icons" style="font-size:18px;width:18px">{{watcherEnabled?'visibility':'visibility_off'}}</span>Watcher: {{watcherEnabled?'ON':'OFF'}}</div>
+      <div class="sidebar-item danger" (click)="killDaemons()"><span class="material-icons" style="font-size:18px;width:18px">bug_report</span>Kill Daemons</div>
+      <div class="sidebar-item daemon-status">
+        <span class="material-icons" style="font-size:18px;width:18px">dns</span>
+        <span>Daemon: {{daemonRunning?'Running':'Stopped'}}</span>
+        <button class="btn btn-ghost btn-xs" style="margin-left:auto" (click)="daemonRunning?stopDaemon():startDaemon()">
+          <span class="material-icons" style="font-size:16px">{{daemonRunning?'stop':'play_arrow'}}</span>
+        </button>
+      </div>
       <div class="spacer"></div>
       <button class="theme-btn" (click)="toggleTheme()">{{theme()==='dark'?'☀️':'🌙'}}</button>
       <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>{{connLabel()}}</div>
@@ -19,13 +28,21 @@
     <main class="main">
       @switch (activeTab()) {
         @case ('tunnels') {
-          <div class="page-header"><h1>Tunnels</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="refreshTunnels()">↻</button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
+          <div class="page-header"><h1>Dashboard</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="refreshTunnels()">↻</button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
           @if (showBind) {
             <div class="card bind-row"><input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain"><select class="input" [(ngModel)]="bind.zoneId"><option value="">Select domain...</option><option *ngFor="let z of zones" [value]="z.id">{{z.name}}</option></select><input class="input" [(ngModel)]="bind.port" placeholder="Port" type="number"><button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button></div>
           }
           <div class="stats-row"><div class="stat"><span class="stat-num">{{tunnels().length}}</span><span class="stat-label">Tunnels</span></div><div class="stat"><span class="stat-num green">{{runningCount()}}</span><span class="stat-label">Running</span></div><div class="stat"><span class="stat-num red">{{crashedCount()}}</span><span class="stat-label">Crashed</span></div><div class="stat"><span class="stat-num muted">{{stoppedCount()}}</span><span class="stat-label">Stopped</span></div></div>
           <div class="card">
-            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th>Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td><td>{{t.hostname||'-'}}</td><td class="muted">{{t.port||'-'}}</td><td class="action-cell"><button class="btn btn-ghost btn-xs" (click)="showLogs(t.tunnelId)">Logs</button><button class="btn btn-ghost btn-xs" (click)="unbind(t.tunnelId)">Unbind</button><button class="btn btn-ghost btn-xs danger" (click)="deleteTunnel(t.tunnelId)">Delete</button></td></tr></tbody></table>
+            <table *ngIf="tunnels().length>0"><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th style="width:220px">Actions</th></tr></thead><tbody><tr *ngFor="let t of tunnels()"><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td><td>{{t.hostname||'-'}}</td><td class="muted">{{t.port||'-'}}</td><td class="action-cell">
+                      <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=''"><span class="material-icons" style="font-size:16px">edit_note</span></button>
+                      <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)"><span class="material-icons" style="font-size:16px">shield</span></button>
+                      <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl(t.hostname?'https://'+t.hostname:'')"><span class="material-icons" style="font-size:16px">content_copy</span></button>
+                      <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr(t.hostname?'https://'+t.hostname:'')"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                      <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)"><span class="material-icons" style="font-size:16px">terminal</span></button>
+                      <button class="btn btn-ghost btn-xs" title="Stop" (click)="unbind(t.tunnelId)"><span class="material-icons" style="font-size:16px">stop_circle</span></button>
+                      <button class="btn btn-ghost btn-xs danger" title="Delete" (click)="deleteTunnel(t.tunnelId)"><span class="material-icons" style="font-size:16px">delete_outline</span></button>
+                    </td></tr></tbody></table>
             <div *ngIf="tunnels().length===0" class="empty">No tunnels yet.</div>
           </div>
         }
