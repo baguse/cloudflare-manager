@@ -54,6 +54,16 @@ class HttpApiServer {
       return;
     }
 
+    // Swagger / OpenAPI docs - no auth required
+    if (method == 'GET' && routePath == '/docs') {
+      _serveSwaggerUi(request.response);
+      return;
+    }
+    if (method == 'GET' && routePath == '/openapi.json') {
+      _serveOpenApiSpec(request.response);
+      return;
+    }
+
     // Health check - no auth required
     if (method == 'GET' && routePath == '/health') {
       _handleHealth(request.response);
@@ -384,5 +394,120 @@ class HttpApiServer {
     response.headers.set('Access-Control-Allow-Origin', '*');
     response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     response.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  }
+
+  void _serveSwaggerUi(HttpResponse response) {
+    final html = '''
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Cloudflare Manager API</title>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+<style>html{box-sizing:border-box;overflow-y:scroll}*,:after,:before{box-sizing:inherit}body{background:#fafafa;margin:0}</style>
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js" crossorigin></script>
+<script>
+SwaggerUIBundle({url:"/openapi.json",dom_id:"#swagger-ui",deepLinking:true,presets:[SwaggerUIBundle.presets.apis,SwaggerUIStandalonePreset],layout:"StandaloneLayout"})
+</script></body></html>''';
+    _html(response, html);
+  }
+
+  void _serveOpenApiSpec(HttpResponse response) {
+    final spec = {
+      'openapi': '3.0.3',
+      'info': {
+        'title': 'Cloudflare Manager API',
+        'version': '1.0.0',
+        'description': 'REST API for managing Cloudflare tunnels, DNS, webhooks, and more.',
+      },
+      'servers': [{'url': 'http://localhost:$port'}],
+      'security': [{'bearerAuth': []}],
+      'components': {
+        'securitySchemes': {
+          'bearerAuth': {'type': 'http', 'scheme': 'bearer'},
+        },
+      },
+      'paths': {
+        '/health': {
+          'get': {
+            'summary': 'Health check',
+            'security': [],
+            'responses': {'200': {'description': 'OK'}},
+          },
+        },
+        '/status': {
+          'get': {
+            'summary': 'Daemon and tunnel status',
+            'responses': {'200': {'description': 'Daemon status'}},
+          },
+        },
+        '/tunnels': {
+          'get': {
+            'summary': 'List all tunnels',
+            'responses': {'200': {'description': 'Tunnel list'}},
+          },
+          'post': {
+            'summary': 'Bind an existing tunnel',
+            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['tunnelId', 'token', 'port'], 'properties': {'tunnelId': {'type': 'string'}, 'token': {'type': 'string'}, 'port': {'type': 'integer'}, 'hostname': {'type': 'string'}}}}}},
+            'responses': {'200': {'description': 'Tunnel bound'}},
+          },
+        },
+        '/tunnels/{id}': {
+          'delete': {
+            'summary': 'Unbind a tunnel',
+            'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}],
+            'responses': {'200': {'description': 'Tunnel unbound'}},
+          },
+        },
+        '/logs/{id}': {
+          'get': {
+            'summary': 'Get tunnel logs',
+            'parameters': [
+              {'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}},
+              {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 50}},
+            ],
+            'responses': {'200': {'description': 'Log entries'}},
+          },
+        },
+        '/zones': {
+          'get': {
+            'summary': 'List Cloudflare zones',
+            'responses': {'200': {'description': 'Zone list'}},
+          },
+        },
+        '/bind': {
+          'post': {
+            'summary': 'Quick bind — create tunnel + DNS in one call',
+            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['subdomain', 'zoneId', 'zoneName', 'port'], 'properties': {'subdomain': {'type': 'string'}, 'zoneId': {'type': 'string'}, 'zoneName': {'type': 'string'}, 'port': {'type': 'integer'}}}}}},
+            'responses': {'200': {'description': 'Tunnel created and bound'}},
+          },
+        },
+        '/webhooks/reload': {
+          'post': {
+            'summary': 'Reload webhook configuration',
+            'responses': {'200': {'description': 'Webhooks reloaded'}},
+          },
+        },
+        '/cf-config': {
+          'get': {
+            'summary': 'Check if Cloudflare API is configured',
+            'responses': {'200': {'description': 'Config status'}},
+          },
+          'post': {
+            'summary': 'Set Cloudflare API credentials',
+            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['token', 'accountId'], 'properties': {'token': {'type': 'string'}, 'accountId': {'type': 'string'}}}}}},
+            'responses': {'200': {'description': 'Credentials saved'}},
+          },
+        },
+      },
+    };
+    _jsonResponse(response, 200, spec);
+  }
+
+  void _html(HttpResponse response, String html) {
+    response.headers.contentType = ContentType.html;
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.write(html);
+    response.close();
   }
 }
