@@ -1,8 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'ipc_client.dart';
 import 'cf_api_client.dart';
+import '../cloudflare_service.dart';
+import '../webhook_service.dart';
+import '../webhook_config.dart';
+import '../rate_alert_service.dart';
+import '../rate_alert.dart';
+import '../cloudflared_service.dart';
+import '../backup_restore_screen.dart';
+import '../app_storage.dart';
 
 class HttpApiServer {
   final int port;
@@ -75,7 +84,10 @@ class HttpApiServer {
       return;
     }
 
-    try {
+      try {
+      // Parse path segments: /dns/zones/:zoneId/records, etc.
+      final segments = routePath.split('/').where((s) => s.isNotEmpty).toList();
+
       switch ('$method $routePath') {
         case 'GET /status':
           await _handleStatus(request.response);
@@ -87,16 +99,82 @@ class HttpApiServer {
           await _handleBindTunnel(request);
           break;
         case _ when routePath.startsWith('/tunnels/') && method == 'DELETE':
-          await _handleUnbindTunnel(routePath.split('/').last, request.response);
+          await _handleUnbindTunnel(segments[1], request.response);
+          break;
+        case _ when routePath.startsWith('/tunnels/') && routePath.endsWith('/delete') && method == 'POST':
+          await _handleDeleteTunnel(segments[1], request.response);
           break;
         case _ when routePath.startsWith('/logs/') && method == 'GET':
-          await _handleTunnelLogs(routePath.split('/').last, request.uri.queryParameters['limit'], request.response);
+          await _handleTunnelLogs(segments[1], request.uri.queryParameters['limit'], request.response);
           break;
         case 'POST /webhooks/reload':
           await _handleReloadWebhooks(request.response);
           break;
+        case 'GET /webhooks':
+          await _handleListWebhooks(request.response);
+          break;
+        case 'POST /webhooks':
+          await _handleCreateWebhook(request);
+          break;
+        case _ when routePath.startsWith('/webhooks/') && method == 'PUT':
+          await _handleUpdateWebhook(segments[1], request);
+          break;
+        case _ when routePath.startsWith('/webhooks/') && method == 'DELETE':
+          await _handleDeleteWebhook(segments[1], request.response);
+          break;
+        case _ when routePath.startsWith('/webhooks/') && routePath.endsWith('/test') && method == 'POST':
+          await _handleTestWebhook(segments[1], request.response);
+          break;
+        case 'GET /webhook-logs':
+          await _handleWebhookLogs(request.response);
+          break;
         case 'GET /zones':
           await _handleZones(request.response);
+          break;
+        case 'GET /dns':
+          await _handleListDns(request);
+          break;
+        case 'POST /dns':
+          await _handleCreateDns(request);
+          break;
+        case _ when routePath.startsWith('/dns/') && method == 'PUT':
+          await _handleUpdateDns(request);
+          break;
+        case _ when routePath.startsWith('/dns/') && method == 'DELETE':
+          await _handleDeleteDns(request);
+          break;
+        case 'GET /rate-alerts':
+          await _handleListRateAlerts(request.response);
+          break;
+        case 'POST /rate-alerts':
+          await _handleCreateRateAlert(request);
+          break;
+        case _ when routePath.startsWith('/rate-alerts/') && method == 'DELETE':
+          await _handleDeleteRateAlert(segments[1], request.response);
+          break;
+        case 'POST /rate-alerts/check':
+          await _handleCheckRateAlerts(request.response);
+          break;
+        case 'POST /backup':
+          await _handleCreateBackup(request.response);
+          break;
+        case 'GET /backups':
+          await _handleListBackups(request.response);
+          break;
+        case 'POST /daemon/start':
+          await _handleDaemonStart(request.response);
+          break;
+        case 'POST /daemon/stop':
+          await _handleDaemonStop(request.response);
+          break;
+        case 'GET /settings':
+          await _handleGetSettings(request.response);
+          break;
+        case 'PATCH /settings':
+          await _handlePatchSettings(request);
+          break;
+        case 'GET /export':
+          await _handleExport(request);
           break;
         case 'POST /bind':
           await _handleQuickBind(request);
@@ -327,6 +405,255 @@ class HttpApiServer {
     }
   }
 
+  // ---- Webhooks CRUD ----
+
+  Future<void> _handleListWebhooks(HttpResponse response) async {
+    await WebhookService.instance.loadWebhooks();
+    _jsonResponse(response, 200, {'ok': true, 'webhooks': WebhookService.instance.webhooks.map((w) => w.toJson()).toList()});
+  }
+
+  Future<void> _handleCreateWebhook(HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final cfg = WebhookConfig.fromJson(body);
+    await WebhookService.instance.loadWebhooks();
+    await WebhookService.instance.addWebhook(cfg);
+    _jsonResponse(request.response, 201, {'ok': true, 'id': cfg.id});
+  }
+
+  Future<void> _handleUpdateWebhook(String id, HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final cfg = WebhookConfig.fromJson({...body, 'id': id});
+    await WebhookService.instance.loadWebhooks();
+    await WebhookService.instance.updateWebhook(cfg);
+    _jsonResponse(request.response, 200, {'ok': true});
+  }
+
+  Future<void> _handleDeleteWebhook(String id, HttpResponse response) async {
+    await WebhookService.instance.loadWebhooks();
+    await WebhookService.instance.deleteWebhook(id);
+    _jsonResponse(response, 200, {'ok': true});
+  }
+
+  Future<void> _handleTestWebhook(String id, HttpResponse response) async {
+    await WebhookService.instance.loadWebhooks();
+    final w = WebhookService.instance.webhooks.where((w) => w.id == id).firstOrNull;
+    if (w == null) {
+      _jsonResponse(response, 404, {'ok': false, 'error': 'Webhook not found'});
+      return;
+    }
+    final ok = await WebhookService.instance.testWebhook(w);
+    _jsonResponse(response, 200, {'ok': ok});
+  }
+
+  Future<void> _handleWebhookLogs(HttpResponse response) async {
+    await WebhookService.instance.loadLogs();
+    _jsonResponse(response, 200, {'ok': true, 'logs': WebhookService.instance.logs.map((l) => l.toJson()).toList()});
+  }
+
+  // ---- DNS Records ----
+
+  Future<void> _handleListDns(HttpRequest request) async {
+    final zoneId = request.uri.queryParameters['zoneId'];
+    if (zoneId == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': '?zoneId= required'});
+      return;
+    }
+    final records = await CloudflareService.listDnsRecords(zoneId);
+    _jsonResponse(request.response, 200, {'ok': true, 'records': records});
+  }
+
+  Future<void> _handleCreateDns(HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final zoneId = body['zoneId'] as String?;
+    final type = body['type'] as String?;
+    final name = body['name'] as String?;
+    final content = body['content'] as String?;
+    if (zoneId == null || type == null || name == null || content == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'zoneId, type, name, content required'});
+      return;
+    }
+    final ok = await CloudflareService.createDnsRecord(zoneId,
+      type: type, name: name, content: content,
+      ttl: body['ttl'] as int? ?? 1,
+      proxied: body['proxied'] as bool?,
+      priority: body['priority'] as int?,
+    );
+    _jsonResponse(request.response, ok ? 201 : 500, {'ok': ok});
+  }
+
+  Future<void> _handleUpdateDns(HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final zoneId = body['zoneId'] as String?;
+    final recordId = body['recordId'] as String?;
+    if (zoneId == null || recordId == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'zoneId and recordId required'});
+      return;
+    }
+    final ok = await CloudflareService.updateDnsRecord(zoneId, recordId,
+      type: body['type'] as String?,
+      name: body['name'] as String?,
+      content: body['content'] as String?,
+      ttl: body['ttl'] as int?,
+      proxied: body['proxied'] as bool?,
+    );
+    _jsonResponse(request.response, ok ? 200 : 500, {'ok': ok});
+  }
+
+  Future<void> _handleDeleteDns(HttpRequest request) async {
+    final zoneId = request.uri.queryParameters['zoneId'];
+    final recordId = request.uri.queryParameters['recordId'];
+    if (zoneId == null || recordId == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': '?zoneId=&recordId= required'});
+      return;
+    }
+    final ok = await CloudflareService.deleteDnsRecord(zoneId, recordId);
+    _jsonResponse(request.response, ok ? 200 : 500, {'ok': ok});
+  }
+
+  // ---- Rate Alerts ----
+
+  Future<void> _handleListRateAlerts(HttpResponse response) async {
+    await RateAlertService.instance.loadAlerts();
+    _jsonResponse(response, 200, {'ok': true, 'alerts': RateAlertService.instance.alerts.map((a) => a.toJson()).toList()});
+  }
+
+  Future<void> _handleCreateRateAlert(HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    final alert = RateAlertConfig.fromJson(body);
+    await RateAlertService.instance.loadAlerts();
+    await RateAlertService.instance.addAlert(alert);
+    _jsonResponse(request.response, 201, {'ok': true});
+  }
+
+  Future<void> _handleDeleteRateAlert(String id, HttpResponse response) async {
+    await RateAlertService.instance.loadAlerts();
+    await RateAlertService.instance.deleteAlert(id);
+    _jsonResponse(response, 200, {'ok': true});
+  }
+
+  Future<void> _handleCheckRateAlerts(HttpResponse response) async {
+    final results = await RateAlertService.instance.checkNow();
+    _jsonResponse(response, 200, {'ok': true, 'results': results});
+  }
+
+  // ---- Backup / Restore ----
+
+  Future<void> _handleCreateBackup(HttpResponse response) async {
+    await createAutoBackup();
+    _jsonResponse(response, 200, {'ok': true, 'message': 'Auto-backup created'});
+  }
+
+  Future<void> _handleListBackups(HttpResponse response) async {
+    final backups = await listAutoBackups();
+    _jsonResponse(response, 200, {'ok': true, 'backups': backups});
+  }
+
+  // ---- Daemon Control ----
+
+  Future<void> _handleDaemonStart(HttpResponse response) async {
+    final client = DaemonClient();
+    if (await client.connect()) {
+      _jsonResponse(response, 200, {'ok': true, 'message': 'Daemon already running'});
+      client.disconnect();
+      return;
+    }
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final exe = Platform.resolvedExecutable;
+    Process.start(exe, ['daemon', 'start'], mode: ProcessStartMode.detached);
+    _jsonResponse(response, 200, {'ok': true, 'message': 'Daemon starting...'});
+  }
+
+  Future<void> _handleDaemonStop(HttpResponse response) async {
+    final client = DaemonClient();
+    if (!await client.connect()) {
+      _jsonResponse(response, 503, {'ok': false, 'error': 'Daemon not running'});
+      return;
+    }
+    await client.shutdown();
+    client.disconnect();
+    _jsonResponse(response, 200, {'ok': true, 'message': 'Daemon stopped'});
+  }
+
+  // ---- Settings ----
+
+  Future<void> _handleGetSettings(HttpResponse response) async {
+    final data = <String, dynamic>{};
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    for (final key in ['auto_bind_min_port', 'auto_bind_max_port', 'api_enabled', 'api_port', 'close_to_tray', 'auto_start', 'theme_mode']) {
+      data[key] = await AppStorage.instance.read(key: key);
+    }
+    final dcfg = File('$home/.cloudflared/daemon.json');
+    if (await dcfg.exists()) {
+      data['daemon'] = json.decode(await dcfg.readAsString());
+    }
+    _jsonResponse(response, 200, {'ok': true, 'settings': data});
+  }
+
+  Future<void> _handlePatchSettings(HttpRequest request) async {
+    final body = json.decode(await utf8.decodeStream(request));
+    for (final entry in (body as Map<String, dynamic>).entries) {
+      await AppStorage.instance.write(key: entry.key, value: entry.value?.toString());
+    }
+    _jsonResponse(request.response, 200, {'ok': true});
+  }
+
+  // ---- Export ----
+
+  Future<void> _handleExport(HttpRequest request) async {
+    final fmt = request.uri.queryParameters['format'] ?? 'json';
+    final export = <String, dynamic>{'generatedAt': DateTime.now().toIso8601String()};
+
+    final tunnels = await CloudflareService.listTunnels();
+    final tunnelList = <Map<String, dynamic>>[];
+    for (final t in tunnels) {
+      final id = t['id'] as String? ?? '';
+      final cfg = await CloudflareService.getTunnelConfig(id);
+      final ingress = (cfg?['config']?['ingress'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
+      tunnelList.add({'id': id, 'name': t['name'], 'status': t['status'] ?? 'unknown', 'connections': t['connections'] ?? [], 'ingress': ingress});
+    }
+    export['tunnels'] = tunnelList;
+
+    final zones = await CfApiClient.getZones();
+    final zoneList = <Map<String, dynamic>>[];
+    for (final z in zones) {
+      final records = await CloudflareService.listDnsRecords(z['id']);
+      zoneList.add({'id': z['id'], 'name': z['name'], 'records': records});
+    }
+    export['dns'] = zoneList;
+
+    String content;
+    String contentType;
+    if (fmt == 'md') {
+      final buf = StringBuffer();
+      buf.writeln('# Cloudflare Manager Export');
+      buf.writeln();
+      for (final t in tunnelList) {
+        buf.writeln('## ${t['name']}');
+        buf.writeln('- ID: `${t['id']}` - Status: ${t['status']}');
+        buf.writeln();
+      }
+      content = buf.toString();
+      contentType = 'text/markdown';
+    } else {
+      content = const JsonEncoder.withIndent('  ').convert(export);
+      contentType = 'application/json';
+    }
+    request.response.headers.contentType = ContentType.parse(contentType);
+    request.response.headers.set('Access-Control-Allow-Origin', '*');
+    request.response.write(content);
+    request.response.close();
+  }
+
+  // ---- Delete tunnel (full) ----
+
+  Future<void> _handleDeleteTunnel(String tunnelId, HttpResponse response) async {
+    await CloudflaredService.unregisterAppTunnel(tunnelId);
+    await CloudflaredService.deleteCredentialsFile(tunnelId);
+    final dnsOk = await CloudflareService.deleteTunnelDnsRecords(tunnelId);
+    final tunnelOk = await CloudflareService.deleteTunnel(tunnelId);
+    _jsonResponse(response, 200, {'ok': tunnelOk, 'dnsDeleted': dnsOk});
+  }
+
   void _jsonResponse(HttpResponse response, int status, Map<String, dynamic> data) {
     _corsHeaders(response);
     response.headers.contentType = ContentType.json;
@@ -427,81 +754,92 @@ SwaggerUIBundle({url:"/openapi.json",dom_id:"#swagger-ui",deepLinking:true,prese
           'bearerAuth': {'type': 'http', 'scheme': 'bearer'},
         },
       },
-      'paths': {
-        '/health': {
-          'get': {
-            'summary': 'Health check',
-            'security': [],
-            'responses': {'200': {'description': 'OK'}},
-          },
-        },
-        '/status': {
-          'get': {
-            'summary': 'Daemon and tunnel status',
-            'responses': {'200': {'description': 'Daemon status'}},
-          },
-        },
-        '/tunnels': {
-          'get': {
-            'summary': 'List all tunnels',
-            'responses': {'200': {'description': 'Tunnel list'}},
-          },
-          'post': {
-            'summary': 'Bind an existing tunnel',
-            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['tunnelId', 'token', 'port'], 'properties': {'tunnelId': {'type': 'string'}, 'token': {'type': 'string'}, 'port': {'type': 'integer'}, 'hostname': {'type': 'string'}}}}}},
-            'responses': {'200': {'description': 'Tunnel bound'}},
-          },
-        },
-        '/tunnels/{id}': {
-          'delete': {
-            'summary': 'Unbind a tunnel',
-            'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}],
-            'responses': {'200': {'description': 'Tunnel unbound'}},
-          },
-        },
-        '/logs/{id}': {
-          'get': {
-            'summary': 'Get tunnel logs',
-            'parameters': [
-              {'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}},
-              {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 50}},
-            ],
-            'responses': {'200': {'description': 'Log entries'}},
-          },
-        },
-        '/zones': {
-          'get': {
-            'summary': 'List Cloudflare zones',
-            'responses': {'200': {'description': 'Zone list'}},
-          },
-        },
-        '/bind': {
-          'post': {
-            'summary': 'Quick bind — create tunnel + DNS in one call',
-            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['subdomain', 'zoneId', 'zoneName', 'port'], 'properties': {'subdomain': {'type': 'string'}, 'zoneId': {'type': 'string'}, 'zoneName': {'type': 'string'}, 'port': {'type': 'integer'}}}}}},
-            'responses': {'200': {'description': 'Tunnel created and bound'}},
-          },
-        },
-        '/webhooks/reload': {
-          'post': {
-            'summary': 'Reload webhook configuration',
-            'responses': {'200': {'description': 'Webhooks reloaded'}},
-          },
-        },
-        '/cf-config': {
-          'get': {
-            'summary': 'Check if Cloudflare API is configured',
-            'responses': {'200': {'description': 'Config status'}},
-          },
-          'post': {
-            'summary': 'Set Cloudflare API credentials',
-            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['token', 'accountId'], 'properties': {'token': {'type': 'string'}, 'accountId': {'type': 'string'}}}}}},
-            'responses': {'200': {'description': 'Credentials saved'}},
-          },
-        },
-      },
+      'paths': _buildOpenApiPaths(),
     };
     _jsonResponse(response, 200, spec);
+  }
+
+  Map<String, dynamic> _buildOpenApiPaths() {
+    final p = <String, dynamic>{
+      '/health': {'get': {'summary': 'Health check', 'security': [], 'responses': {'200': {'description': 'OK'}}}},
+      '/status': {'get': {'summary': 'Daemon and tunnel status', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Daemon status'}}}},
+      '/tunnels': {
+        'get': {'summary': 'List all tunnels', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Tunnel list'}}},
+        'post': {'summary': 'Bind an existing tunnel', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['tunnelId', 'token', 'port'], 'properties': {'tunnelId': {'type': 'string'}, 'token': {'type': 'string'}, 'port': {'type': 'integer'}, 'hostname': {'type': 'string'}}}}}}, 'responses': {'200': {'description': 'Tunnel bound'}}},
+      },
+      '/tunnels/{id}': {
+        'delete': {'summary': 'Unbind a tunnel', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Tunnel unbound'}}},
+      },
+      '/tunnels/{id}/delete': {
+        'post': {'summary': 'Full delete (Cloudflare + DNS + local)', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Tunnel deleted'}}},
+      },
+      '/logs/{id}': {
+        'get': {'summary': 'Get tunnel logs', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}, {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 50}}], 'responses': {'200': {'description': 'Log entries'}}},
+      },
+      '/webhooks': {
+        'get': {'summary': 'List all webhooks', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Webhook list'}}},
+        'post': {'summary': 'Create a webhook', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object'}}}}, 'responses': {'201': {'description': 'Created'}}},
+      },
+      '/webhooks/{id}': {
+        'put': {'summary': 'Update a webhook', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object'}}}}, 'responses': {'200': {'description': 'Updated'}}},
+        'delete': {'summary': 'Delete a webhook', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Deleted'}}},
+      },
+      '/webhooks/{id}/test': {
+        'post': {'summary': 'Test a webhook', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Test result'}}},
+      },
+      '/webhooks/reload': {
+        'post': {'summary': 'Reload webhook configuration', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Webhooks reloaded'}}},
+      },
+      '/webhook-logs': {
+        'get': {'summary': 'Get webhook execution logs', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Log entries'}}},
+      },
+      '/zones': {
+        'get': {'summary': 'List Cloudflare zones', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Zone list'}}},
+      },
+      '/dns': {
+        'get': {'summary': 'List DNS records for a zone', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'zoneId', 'in': 'query', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Record list'}}},
+        'post': {'summary': 'Create a DNS record', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['zoneId', 'type', 'name', 'content'], 'properties': {'zoneId': {'type': 'string'}, 'type': {'type': 'string'}, 'name': {'type': 'string'}, 'content': {'type': 'string'}, 'ttl': {'type': 'integer'}, 'proxied': {'type': 'boolean'}}}}}}, 'responses': {'201': {'description': 'Created'}}},
+        'put': {'summary': 'Update a DNS record', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['zoneId', 'recordId'], 'properties': {'zoneId': {'type': 'string'}, 'recordId': {'type': 'string'}, 'type': {'type': 'string'}, 'name': {'type': 'string'}, 'content': {'type': 'string'}}}}}}, 'responses': {'200': {'description': 'Updated'}}},
+        'delete': {'summary': 'Delete a DNS record', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'zoneId', 'in': 'query', 'required': true, 'schema': {'type': 'string'}}, {'name': 'recordId', 'in': 'query', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Deleted'}}},
+      },
+      '/rate-alerts': {
+        'get': {'summary': 'List rate alerts', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Alert list'}}},
+        'post': {'summary': 'Create a rate alert', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object'}}}}, 'responses': {'201': {'description': 'Created'}}},
+      },
+      '/rate-alerts/{id}': {
+        'delete': {'summary': 'Delete a rate alert', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'id', 'in': 'path', 'required': true, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'Deleted'}}},
+      },
+      '/rate-alerts/check': {
+        'post': {'summary': 'Run rate alert check now', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Check results'}}},
+      },
+      '/backup': {
+        'post': {'summary': 'Create an auto-backup', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Backup created'}}},
+      },
+      '/backups': {
+        'get': {'summary': 'List auto-backups', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Backup list'}}},
+      },
+      '/daemon/start': {
+        'post': {'summary': 'Start the daemon', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Daemon starting'}}},
+      },
+      '/daemon/stop': {
+        'post': {'summary': 'Stop the daemon', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Daemon stopped'}}},
+      },
+      '/settings': {
+        'get': {'summary': 'Read all settings', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Settings'}}},
+        'patch': {'summary': 'Update settings', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object'}}}}, 'responses': {'200': {'description': 'Updated'}}},
+      },
+      '/export': {
+        'get': {'summary': 'Export tunnels and DNS', 'security': [{'bearerAuth': []}], 'parameters': [{'name': 'format', 'in': 'query', 'schema': {'type': 'string', 'enum': ['json', 'md'], 'default': 'json'}}], 'responses': {'200': {'description': 'Export data'}}},
+      },
+      '/bind': {
+        'post': {'summary': 'Quick bind — create tunnel + DNS in one call', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['subdomain', 'zoneId', 'zoneName', 'port'], 'properties': {'subdomain': {'type': 'string'}, 'zoneId': {'type': 'string'}, 'zoneName': {'type': 'string'}, 'port': {'type': 'integer'}}}}}}, 'responses': {'200': {'description': 'Tunnel created and bound'}}},
+      },
+      '/cf-config': {
+        'get': {'summary': 'Check if Cloudflare API is configured', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Config status'}}},
+        'post': {'summary': 'Set Cloudflare API credentials', 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'required': ['token', 'accountId'], 'properties': {'token': {'type': 'string'}, 'accountId': {'type': 'string'}}}}}}, 'responses': {'200': {'description': 'Credentials saved'}}},
+      },
+    };
+    return p;
   }
 
   void _html(HttpResponse response, String html) {
