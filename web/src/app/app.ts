@@ -22,25 +22,32 @@ import { ToastService } from './toast.service';
           <button class="btn btn-primary full" (click)="connect()">Connect</button>
         </div>
       } @else {
-        <aside class="sidebar">
-          <div class="brand">CF Manager</div>
+        <aside class="sidebar" [class.collapsed]="sidebarCollapsed()">
+          <div class="brand">
+            @if (!sidebarCollapsed()) { CF Manager } @else { CF }
+            <button class="sidebar-toggle" (click)="sidebarCollapsed.set(!sidebarCollapsed())" [title]="sidebarCollapsed()?'Expand':'Collapse'">
+              <span class="material-icons" style="font-size:16px">@if (sidebarCollapsed()) { menu_open } @else { menu }</span>
+            </button>
+          </div>
           @for (t of tabs; track t.id) {
-            <a class="sidebar-item" routerLink="/{{t.id}}" routerLinkActive="active"><span class="material-icons" style="font-size:18px;width:18px">{{t.icon}}</span>{{t.label}}</a>
+            <a class="sidebar-item" routerLink="/{{t.id}}" routerLinkActive="active" [title]="sidebarCollapsed()?t.label:''"><span class="material-icons" style="font-size:18px;width:18px">{{t.icon}}</span>@if (!sidebarCollapsed()) { <span>{{t.label}}</span> }</a>
           }
-          <div class="sidebar-item" (click)="toggleWatcher()"><span class="material-icons" style="font-size:18px;width:18px">{{watcherEnabled?'visibility':'visibility_off'}}</span>Watcher: {{watcherEnabled?'ON':'OFF'}}</div>
-          <div class="sidebar-item danger" (click)="killDaemons()"><span class="material-icons" style="font-size:18px;width:18px">bug_report</span>Kill Daemons</div>
-          <div class="sidebar-item daemon-status">
+          <div class="sidebar-item" (click)="toggleWatcher()" [title]="sidebarCollapsed()?'Watcher':''"><span class="material-icons" style="font-size:18px;width:18px">{{watcherEnabled?'visibility':'visibility_off'}}</span>@if (!sidebarCollapsed()) { Watcher: {{watcherEnabled?'ON':'OFF'}} }</div>
+          <div class="sidebar-item danger" (click)="killDaemons()" [title]="sidebarCollapsed()?'Kill Daemons':''"><span class="material-icons" style="font-size:18px;width:18px">bug_report</span>@if (!sidebarCollapsed()) { Kill Daemons }</div>
+          <div class="sidebar-item daemon-status" [title]="sidebarCollapsed()?'Daemon: '+(daemonRunning()?'Running':'Stopped'):''">
             <span class="material-icons" style="font-size:18px;width:18px">dns</span>
+            @if (!sidebarCollapsed()) {
             <span>Daemon: {{daemonRunning()?'Running':'Stopped'}}</span>
             <button class="btn btn-ghost btn-xs" style="margin-left:auto" (click)="daemonRunning()?stopDaemon():startDaemon()">
               <span class="material-icons" style="font-size:16px">{{daemonRunning()?'stop':'play_arrow'}}</span>
             </button>
+            }
           </div>
           <div class="spacer"></div>
           <button class="theme-btn" (click)="toggleTheme()"><span class="material-icons" style="font-size:16px">{{theme()==='dark'?'dark_mode':'light_mode'}}</span></button>
-          <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>{{connLabel()}}</div>
+          <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>@if (!sidebarCollapsed()) { {{connLabel()}} }</div>
         </aside>
-        <main class="main">
+        <main class="main" [class.main-expanded]="sidebarCollapsed()">
           @if (daemonLoading()) { <div class="loading-bar"></div> }
           <router-outlet></router-outlet>
         </main>
@@ -87,9 +94,14 @@ export class AppComponent implements OnInit {
   watcherEnabled = true;
   daemonRunning = signal(false);
   daemonLoading = signal(false);
+  sidebarCollapsed = signal(window.innerWidth < 900);
 
   constructor(api: ApiService, private router: Router) { this.api = api; }
-  ngOnInit() { document.documentElement.className = 'dark'; if (this.api.configured) { this.connected.set(true); this.checkStatus(); } }
+  ngOnInit() {
+    document.documentElement.className = 'dark';
+    if (this.api.configured) { this.connected.set(true); this.checkStatus(); }
+    window.addEventListener('resize', () => this.sidebarCollapsed.set(window.innerWidth < 900));
+  }
 
   connect() { this.api.connect(this.url, this.key); this.connected.set(true); this.checkStatus(); this.router.navigateByUrl('/'); }
 
