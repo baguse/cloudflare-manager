@@ -164,6 +164,7 @@ class HttpApiServer {
           await _handleUpdateDns(request);
           break;
         case _ when routePath.startsWith('/dns/') && method == 'DELETE':
+        case _ when routePath == '/dns' && method == 'DELETE':
           await _handleDeleteDns(request);
           break;
         case 'GET /rate-alerts':
