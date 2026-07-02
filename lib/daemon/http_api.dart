@@ -235,15 +235,7 @@ class HttpApiServer {
     if (result['ok'] == true) {
       _jsonResponse(response, 200, result);
     } else {
-      final socketExists = File(_socketPath).existsSync();
-      _jsonResponse(response, 200, {
-        'ok': true,
-        'apiRunning': true,
-        'daemonRunning': socketExists,
-        'daemonSocket': socketExists ? _socketPath : '(not found)',
-        'note': socketExists ? 'Daemon is running but IPC failed' : 'API running standalone — daemon not detected',
-        'tunnels': const [],
-      });
+      _jsonResponse(response, 200, {'ok': true, 'running': false, 'tunnels': const [], 'eventCount': 0});
     }
   }
 
@@ -301,7 +293,7 @@ class HttpApiServer {
       t['serviceEnabled'] = n?.serviceEnabled == true;
     }
 
-    _jsonResponse(response, 200, {'ok': true, 'tunnels': all});
+    _jsonResponse(response, 200, {'ok': true, 'tunnels': all, 'daemonRunning': onIpcCall != null || File(_socketPath).existsSync()});
   }
 
   Future<void> _handleListTunnels(HttpResponse response) async {

@@ -16,9 +16,9 @@
       <div class="sidebar-item danger" (click)="killDaemons()"><span class="material-icons" style="font-size:18px;width:18px">bug_report</span>Kill Daemons</div>
       <div class="sidebar-item daemon-status">
         <span class="material-icons" style="font-size:18px;width:18px">dns</span>
-        <span>Daemon: {{daemonRunning?'Running':'Stopped'}}</span>
-        <button class="btn btn-ghost btn-xs" style="margin-left:auto" (click)="daemonRunning?stopDaemon():startDaemon()">
-          <span class="material-icons" style="font-size:16px">{{daemonRunning?'stop':'play_arrow'}}</span>
+        <span>Daemon: {{daemonRunning()?'Running':'Stopped'}}</span>
+        <button class="btn btn-ghost btn-xs" style="margin-left:auto" (click)="daemonRunning()?stopDaemon():startDaemon()">
+          <span class="material-icons" style="font-size:16px">{{daemonRunning()?'stop':'play_arrow'}}</span>
         </button>
       </div>
       <div class="spacer"></div>
@@ -56,11 +56,31 @@
         }
         @case ('dns') {
           <div class="page-header"><h1>DNS Editor</h1></div>
-          <div class="card bind-row"><select class="input" [(ngModel)]="dnsZone" (change)="loadDns()"><option *ngFor="let z of zones" [value]="z.name">{{z.name}}</option></select><button class="btn btn-primary btn-sm" (click)="showDnsForm=true">+ New Record</button></div>
+          <div class="card bind-row"><select class="input" [(ngModel)]="dnsZone" (change)="loadDns()"><option *ngFor="let z of zones" [value]="z.name">{{z.name}}</option></select><button class="btn btn-primary btn-sm" (click)="dnsForm={type:'A',name:'',content:'',ttl:1,proxied:false};editDnsId='';showDnsForm=true">+ New Record</button></div>
           @if (showDnsForm) {
-            <div class="card"><div class="bind-row"><select class="input" [(ngModel)]="dnsForm.type"><option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option><option>MX</option></select><input class="input" [(ngModel)]="dnsForm.name" placeholder="Name"><input class="input" [(ngModel)]="dnsForm.content" placeholder="Content"><input class="input" [(ngModel)]="dnsForm.ttl" placeholder="TTL" value="1" style="width:80px"><button class="btn btn-primary btn-sm" (click)="saveDns()">Save</button><button class="btn btn-ghost btn-sm" (click)="showDnsForm=false">Cancel</button></div></div>
+            <div class="card" style="max-width:520px;margin-bottom:16px">
+              <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px">
+                <div><label class="field-label">Type</label><select class="input" [(ngModel)]="dnsForm.type"><option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option><option>MX</option><option>NS</option><option>SRV</option></select></div>
+                <div><label class="field-label">Name <span style="font-weight:400;color:var(--muted);font-size:11px">(@ for root)</span></label><input class="input" [(ngModel)]="dnsForm.name" placeholder="@"></div>
+              </div>
+              <div style="margin-top:12px"><label class="field-label">Content</label><textarea class="input" [(ngModel)]="dnsForm.content" rows="2" [placeholder]="dnsForm.type==='A'?'192.0.2.1':dnsForm.type==='AAAA'?'2001:db8::1':dnsForm.type==='CNAME'?'target.example.com':''" style="resize:vertical;width:100%;box-sizing:border-box"></textarea></div>
+              <div style="display:flex;gap:12px;margin-top:12px">
+                <div style="width:80px"><label class="field-label">TTL</label><input class="input" [(ngModel)]="dnsForm.ttl" type="number" placeholder="auto"></div>
+                @if (dnsForm.type==='MX') { <div style="width:80px"><label class="field-label">Priority</label><input class="input" [(ngModel)]="dnsForm.priority" type="number" placeholder="10"></div> }
+              </div>
+              @if (dnsForm.type==='A'||dnsForm.type==='AAAA'||dnsForm.type==='CNAME') {
+                <div style="margin-top:12px;display:flex;align-items:center;gap:8px"><label class="switch"><input type="checkbox" [(ngModel)]="dnsForm.proxied"><span></span></label><span style="font-size:13px">Proxied</span></div>
+              }
+              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+                <button class="btn btn-ghost btn-sm" (click)="dnsForm={type:'A',name:'',content:'',ttl:1,proxied:false};editDnsId='';showDnsForm=false">Cancel</button>
+                <button class="btn btn-primary btn-sm" (click)="saveDns()">{{editDnsId?'Update':'Save'}}</button>
+              </div>
+            </div>
           }
-          <div class="card"><table *ngIf="dnsRecords.length>0"><thead><tr><th>Type</th><th>Name</th><th>Content</th><th>TTL</th><th></th></tr></thead><tbody><tr *ngFor="let r of dnsRecords"><td>{{r.type}}</td><td class="mono">{{r.name}}</td><td class="mono muted">{{r.content}}</td><td>{{r.ttl==1?'auto':r.ttl}}</td><td class="action-cell"><button class="btn btn-ghost btn-xs" (click)="deleteDns(r)">Del</button></td></tr></tbody></table><div *ngIf="dnsRecords.length===0" class="empty">No records</div></div>
+          <div class="card"><table *ngIf="dnsRecords.length>0"><thead><tr><th>Type</th><th>Name</th><th>Content</th><th>TTL</th><th></th><th></th></tr></thead><tbody><tr *ngFor="let r of dnsRecords"><td><span class="badge" [ngClass]="dnsTypeBadge(r.type)">{{r.type}}</span></td><td class="mono">{{r.name}}</td><td class="mono muted">{{r.content}}</td><td>{{r.ttl==1?'auto':r.ttl}}</td><td><span class="badge" [ngClass]="r.proxied?'badge-yellow':'badge-gray'">{{r.proxied?'PROXIED':'DNS only'}}</span></td><td class="action-cell">
+            <button class="btn btn-ghost btn-xs" (click)="editDns(r)"><span class="material-icons" style="font-size:14px">edit</span></button>
+            <button class="btn btn-ghost btn-xs" (click)="deleteDns(r)"><span class="material-icons" style="font-size:14px">delete_outline</span></button>
+          </td></tr></tbody></table><div *ngIf="dnsRecords.length===0" class="empty">No records</div></div>
         }
         @case ('webhooks') {
           <div class="page-header"><h1>Webhooks</h1><button class="btn btn-primary btn-sm" (click)="showWForm=true">+ New</button></div>

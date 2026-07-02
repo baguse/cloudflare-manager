@@ -31,7 +31,7 @@ export class AppComponent implements OnInit {
   runningCount = computed(() => this.tunnels().filter(t=>t.state==='running').length);
   crashedCount = computed(() => this.tunnels().filter(t=>t.state==='crashed').length);
   stoppedCount = computed(() => this.tunnels().filter(t=>t.state==='stopped'||t.state==='inactive').length);
-  zones: DnsZone[] = []; dnsZone = ''; dnsRecords: DnsRecord[] = []; showDnsForm = false; dnsForm = {type:'A',name:'',content:'',ttl:1};
+  zones: DnsZone[] = []; dnsZone = ''; dnsRecords: DnsRecord[] = []; showDnsForm = false; dnsForm: any = {type:'A',name:'',content:'',ttl:1,proxied:false}; editDnsId = '';
   webhooks: WebhookConfig[] = []; showWForm = false; wForm = {name:'',url:'',type:'http'};
   alerts: RateAlert[] = []; showAForm = false; aForm = {name:'',domain:'',thresholdPerHour:10000};
   backups: Backup[] = [];
@@ -41,7 +41,7 @@ export class AppComponent implements OnInit {
   toastMsg = ''; toastError = false;
   editingNotes: string|null = null; notesText = ''; selectedTags: string[] = []; customTag = '';
   presetTags = ['prod','staging','dev','api','internal','testing','monitoring','backend','frontend','database','auth','webhook'];
-  watcherEnabled = true; daemonRunning = false;
+  watcherEnabled = true;   daemonRunning = signal(false);
   refreshing = signal(false);
 
   ngOnInit() { document.documentElement.className = 'dark'; if (this.configured()) { this.connected.set(true); this.refreshAll(); } }
@@ -63,7 +63,10 @@ export class AppComponent implements OnInit {
 
   async refreshAll() { this.refreshing.set(true); await this.refreshTunnels(); await this.loadZones(); await this.loadWebhooks(); await this.loadAlerts(); await this.loadSettings(); this.refreshing.set(false); }
 
-  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/tunnels/all','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); this.daemonRunning=r.daemonRunning||false; } catch (e) { this.connected.set(false); this.tunnels.set([]); } finally { this.refreshing.set(false); } }
+  async refreshTunnels() { this.refreshing.set(true); try { const r = await this.api('/api/tunnels/all','GET'); this.tunnels.set(r.tunnels||[]); this.connected.set(true); } catch { this.connected.set(false); this.tunnels.set([]); }
+    try { const s = await this.api('/api/status','GET'); this.daemonRunning.set(s.running||s.ok||false); } catch {} this.refreshing.set(false); }
+  async startDaemon() { try{await this.api('/api/daemon/start','POST');this.showToast('Daemon starting...');this.daemonRunning.set(true);}catch{this.showToast('Error',true);} }
+  async stopDaemon() { if(!confirm('Stop daemon?'))return; try{await this.api('/api/daemon/stop','POST');this.showToast('Daemon stopped');this.daemonRunning.set(false);}catch{this.showToast('Error',true);} }
   stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':s==='inactive'?'badge-gray':'badge-gray'; }
 
   async quickBind() {
@@ -80,7 +83,12 @@ export class AppComponent implements OnInit {
 
   async loadZones() { try{const r=await this.api('/api/zones','GET');this.zones=r.zones||[];if(!this.dnsZone&&this.zones.length)this.dnsZone=this.zones[0].name;this.loadDns();}catch{} }
   async loadDns() { const z=this.zones.find(x=>x.name===this.dnsZone);if(!z)return;try{const r=await this.api('/api/dns?zoneId='+z.id,'GET');this.dnsRecords=r.records||[];}catch{} }
-  async saveDns() { const z=this.zones.find(x=>x.name===this.dnsZone);if(!z)return;try{await this.api('/api/dns','POST',{zoneId:z.id,...this.dnsForm,ttl:+this.dnsForm.ttl});this.showDnsForm=false;this.loadDns();}catch{this.showToast('Error',true);} }
+  async saveDns() { const z=this.zones.find(x=>x.name===this.dnsZone);if(!z)return; const data:any={zoneId:z.id,type:this.dnsForm.type,name:this.dnsForm.name,content:this.dnsForm.content,ttl:+this.dnsForm.ttl}; if(this.dnsForm.type==='MX') data.priority=+(this.dnsForm.priority||10); if(this.dnsForm.type==='A'||this.dnsForm.type==='AAAA'||this.dnsForm.type==='CNAME') data.proxied=!!this.dnsForm.proxied;
+    if(this.editDnsId){ data.recordId=this.editDnsId; try{await this.api('/api/dns','PUT',data);this.showToast('Updated');this.showDnsForm=false;this.editDnsId='';this.loadDns();}catch{this.showToast('Error',true);} }
+    else{ try{await this.api('/api/dns','POST',data);this.showToast('Created');this.showDnsForm=false;this.loadDns();}catch{this.showToast('Error',true);} }
+  }
+  editDns(r:any) { this.dnsForm={type:r.type,name:r.name,content:r.content,ttl:r.ttl,proxied:r.proxied||false,priority:r.priority||10}; this.editDnsId=r.id; this.showDnsForm=true; }
+  dnsTypeBadge(t:string) { return t==='A'?'badge-green':t==='AAAA'?'badge-green':t==='CNAME'?'badge-yellow':t==='TXT'?'badge-gray':t==='MX'?'badge-red':t==='NS'?'badge-gray':'badge-gray'; }
   async deleteDns(r:DnsRecord) { if(!confirm('Delete?'))return;const z=this.zones.find(x=>x.name===this.dnsZone);if(!z)return;try{await this.api('/api/dns?zoneId='+z.id+'&recordId='+r.id,'DELETE');this.loadDns();}catch{this.showToast('Error',true);} }
 
   async loadWebhooks() { try{const r=await this.api('/api/webhooks','GET');this.webhooks=r.webhooks||[];}catch{} }
@@ -132,8 +140,6 @@ export class AppComponent implements OnInit {
   splitTags(tags?:string): string[] { return (tags||'').split(',').map(t=>t.trim()).filter(t=>t.length>0); }
   toggleWatcher() { this.watcherEnabled=!this.watcherEnabled; this.showToast('Watcher '+(this.watcherEnabled?'enabled':'disabled')); }
   async killDaemons() { if(!confirm('Kill all cloudflared processes?'))return; try{await this.api('/api/daemon/stop','POST');this.showToast('Daemon killed');}catch{this.showToast('Error',true);} }
-  async startDaemon() { try{await this.api('/api/daemon/start','POST');this.showToast('Daemon starting...');this.daemonRunning=true;}catch{this.showToast('Error',true);} }
-  async stopDaemon() { if(!confirm('Stop daemon?'))return; try{await this.api('/api/daemon/stop','POST');this.showToast('Daemon stopped');this.daemonRunning=false;}catch{this.showToast('Error',true);} }
   async getServiceState(tunnelId:string): Promise<boolean> {
     try{const r=await this.api('/api/settings','GET');return (r.settings||{})['service_'+tunnelId]==='true';}catch{return false;}
   }
