@@ -29,7 +29,7 @@ export class WebhooksComponent implements OnInit {
   ngOnInit() { this.loadWebhooks(); }
 
   async loadWebhooks() { this.loading.set(true); try { const r = await this.api.call('/api/webhooks'); this.hooks.set(r.webhooks||[]); } catch {} finally { this.loading.set(false); } }
-  async saveWebhook() { try { await this.api.call('/api/webhooks','POST',this.wForm); this.showWForm=false; this.loadWebhooks(); this.toast.show('Created'); } catch { this.toast.show('Error',true); } }
-  async testWebhook(id:string) { try { await this.api.call('/api/webhooks/'+id+'/test','POST'); this.toast.show('Test passed'); } catch { this.toast.show('Test failed',true); } }
-  async delWebhook(id:string) { if(!confirm('Delete?')) return; try { await this.api.call('/api/webhooks/'+id,'DELETE'); this.loadWebhooks(); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); } }
+  async saveWebhook() { this.loading.set(true); try { await this.api.call('/api/webhooks','POST',this.wForm); this.showWForm=false; this.wForm = {name:'',url:'',type:'http'}; await this.loadWebhooks(); this.toast.show('Created'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
+  async testWebhook(id:string) { this.loading.set(true); try { await this.api.call('/api/webhooks/'+id+'/test','POST'); this.toast.show('Test passed'); } catch { this.toast.show('Test failed',true); } finally { this.loading.set(false); } }
+  async delWebhook(id:string) { if(!confirm('Delete?')) return; this.loading.set(true); try { await this.api.call('/api/webhooks/'+id,'DELETE'); await this.loadWebhooks(); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
 }

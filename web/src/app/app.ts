@@ -41,6 +41,7 @@ import { ToastService } from './toast.service';
           <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>{{connLabel()}}</div>
         </aside>
         <main class="main">
+          @if (daemonLoading()) { <div class="loading-bar"></div> }
           <router-outlet></router-outlet>
         </main>
 
@@ -85,6 +86,7 @@ export class AppComponent implements OnInit {
   connLabel = () => this.connected()?'Connected':'Disconnected';
   watcherEnabled = true;
   daemonRunning = signal(false);
+  daemonLoading = signal(false);
 
   constructor(api: ApiService, private router: Router) { this.api = api; }
   ngOnInit() { document.documentElement.className = 'dark'; if (this.api.configured) { this.connected.set(true); this.checkStatus(); } }
@@ -95,11 +97,11 @@ export class AppComponent implements OnInit {
 
   async checkStatus() { try { const s = await this.api.call('/api/status','GET'); this.daemonRunning.set(s.running||s.ok||false); } catch {} }
 
-  async startDaemon() { try { await this.api.call('/api/daemon/start','POST'); this.toast.show('Daemon starting...'); this.daemonRunning.set(true); } catch { this.toast.show('Error',true); } }
-  async stopDaemon() { if(!confirm('Stop daemon?')) return; try { await this.api.call('/api/daemon/stop','POST'); this.toast.show('Daemon stopped'); this.daemonRunning.set(false); } catch { this.toast.show('Error',true); } }
+  async startDaemon() { this.daemonLoading.set(true); try { await this.api.call('/api/daemon/start','POST'); this.toast.show('Daemon starting...'); this.daemonRunning.set(true); } catch { this.toast.show('Error',true); } finally { this.daemonLoading.set(false); } }
+  async stopDaemon() { if(!confirm('Stop daemon?')) return; this.daemonLoading.set(true); try { await this.api.call('/api/daemon/stop','POST'); this.toast.show('Daemon stopped'); this.daemonRunning.set(false); } catch { this.toast.show('Error',true); } finally { this.daemonLoading.set(false); } }
 
   toggleWatcher() { this.watcherEnabled = !this.watcherEnabled; this.toast.show('Watcher '+(this.watcherEnabled?'enabled':'disabled')); }
-  async killDaemons() { if(!confirm('Kill all cloudflared processes?')) return; try { await this.api.call('/api/daemon/stop','POST'); this.toast.show('Daemon killed'); } catch { this.toast.show('Error',true); } }
+  async killDaemons() { if(!confirm('Kill all cloudflared processes?')) return; this.daemonLoading.set(true); try { await this.api.call('/api/daemon/stop','POST'); this.toast.show('Daemon killed'); } catch { this.toast.show('Error',true); } finally { this.daemonLoading.set(false); } }
 
   copyQrUrl() { navigator.clipboard.writeText(this.modals.qrData()); this.toast.show('URL copied!'); }
   openUrl(url:string) { window.open(url,'_blank'); }

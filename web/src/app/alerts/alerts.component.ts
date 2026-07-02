@@ -27,7 +27,7 @@ export class AlertsComponent implements OnInit {
   ngOnInit() { this.loadAlerts(); }
 
   async loadAlerts() { this.loading.set(true); try { const r = await this.api.call('/api/rate-alerts'); this.alerts.set(r.alerts||[]); } catch {} finally { this.loading.set(false); } }
-  async saveAlert() { try { await this.api.call('/api/rate-alerts','POST',this.aForm); this.showAForm=false; this.loadAlerts(); this.toast.show('Created'); } catch { this.toast.show('Error',true); } }
-  async checkAlerts() { try { const r = await this.api.call('/api/rate-alerts/check','POST'); this.toast.show(JSON.stringify(r.results)); } catch { this.toast.show('Error',true); } }
-  async delAlert(id:string) { if(!confirm('Delete?')) return; try { await this.api.call('/api/rate-alerts/'+id,'DELETE'); this.loadAlerts(); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); } }
+  async saveAlert() { this.loading.set(true); try { await this.api.call('/api/rate-alerts','POST',this.aForm); this.showAForm=false; this.aForm = {name:'',domain:'',thresholdPerHour:10000}; await this.loadAlerts(); this.toast.show('Created'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
+  async checkAlerts() { this.loading.set(true); try { const r = await this.api.call('/api/rate-alerts/check','POST'); this.toast.show(JSON.stringify(r.results)); } catch { this.toast.show('Error',true); } finally { this.loading.set(false); } }
+  async delAlert(id:string) { if(!confirm('Delete?')) return; this.loading.set(true); try { await this.api.call('/api/rate-alerts/'+id,'DELETE'); await this.loadAlerts(); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
 }

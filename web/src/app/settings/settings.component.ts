@@ -40,5 +40,5 @@ export class SettingsComponent implements OnInit {
   ngOnInit() { this.loadSettings(); }
 
   async loadSettings() { this.loading.set(true); try { const r = await this.api.call('/api/settings'); this.settings = r.settings||{}; } catch {} finally { this.loading.set(false); } }
-  async saveSettings() { try { await this.api.call('/api/settings','PATCH',this.settings); this.toast.show('Saved'); } catch { this.toast.show('Error',true); } }
+  async saveSettings() { this.loading.set(true); try { await this.api.call('/api/settings','PATCH',this.settings); this.toast.show('Saved'); } catch { this.toast.show('Error',true); } finally { this.loading.set(false); } }
 }

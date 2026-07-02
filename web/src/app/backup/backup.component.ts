@@ -23,5 +23,5 @@ export class BackupComponent implements OnInit {
   ngOnInit() { this.loadBackups(); }
 
   async loadBackups() { this.loading.set(true); try { const r = await this.api.call('/api/backups'); this.backups.set(r.backups||[]); } catch {} finally { this.loading.set(false); } }
-  async createBackup() { try { await this.api.call('/api/backup','POST'); this.toast.show('Created'); this.loadBackups(); } catch { this.toast.show('Error',true); } }
+  async createBackup() { this.loading.set(true); try { await this.api.call('/api/backup','POST'); this.toast.show('Created'); await this.loadBackups(); } catch { this.toast.show('Error',true); this.loading.set(false); } }
 }

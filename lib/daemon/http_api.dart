@@ -328,6 +328,9 @@ class HttpApiServer {
       return;
     }
     final result = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': token, 'hostname': hostname, 'port': port});
+    if (result['ok'] == true) {
+      await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
+    }
     _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
   }
 
@@ -399,6 +402,7 @@ class HttpApiServer {
     // 4. Bind via daemon
     final bindResult = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': tunnelToken, 'hostname': hostname, 'port': port});
     if (bindResult['ok'] == true) {
+      await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken, hostname: hostname);
       _jsonResponse(request.response, 200, {
         'ok': true,
         'tunnelId': tunnelId,

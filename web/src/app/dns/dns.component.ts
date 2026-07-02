@@ -92,8 +92,7 @@ export class DnsComponent implements OnInit {
     if (!z) return;
     this.loading.set(true);
     this.error.set('');
-    try { await this._fetchDns(z.id); } catch (e: any) { this.error.set(e.error || 'Connection failed'); }
-    this.loading.set(false);
+    try { await this._fetchDns(z.id); } catch (e: any) { this.error.set(e.error || 'Connection failed'); } finally { this.loading.set(false); }
   }
 
   private async _fetchDns(zoneId: string) {
@@ -107,10 +106,11 @@ export class DnsComponent implements OnInit {
     const data: any = {zoneId: z.id, type: this.dnsForm.type, name: this.dnsForm.name, content: this.dnsForm.content, ttl: +this.dnsForm.ttl};
     if (this.dnsForm.type === 'MX') data.priority = +(this.dnsForm.priority || 10);
     if (this.dnsForm.type === 'A' || this.dnsForm.type === 'AAAA' || this.dnsForm.type === 'CNAME') data.proxied = !!this.dnsForm.proxied;
+    this.loading.set(true);
     try {
       if (this.editDnsId) { data.recordId = this.editDnsId; await this.api.call('/api/dns', 'PUT', data); this.toast.show('Updated'); }
       else { await this.api.call('/api/dns', 'POST', data); this.toast.show('Created'); }
-    } catch { this.toast.show('Error', true); return; }
+    } catch { this.toast.show('Error', true); this.loading.set(false); return; }
     this.showDnsForm = false;
     this.editDnsId = '';
     this.dnsForm = {type:'A',name:'',content:'',ttl:1,proxied:false};
@@ -123,6 +123,7 @@ export class DnsComponent implements OnInit {
     if (!confirm('Delete?')) return;
     const z = this.zones().find(x => x.name === this.dnsZone);
     if (!z) return;
-    try { await this.api.call('/api/dns?zoneId=' + z.id + '&recordId=' + r.id, 'DELETE'); await this.reloadDns(); } catch { this.toast.show('Error', true); }
+    this.loading.set(true);
+    try { await this.api.call('/api/dns?zoneId=' + z.id + '&recordId=' + r.id, 'DELETE'); this.toast.show('Deleted'); await this.reloadDns(); } catch { this.toast.show('Error', true); this.loading.set(false); }
   }
 }
