@@ -257,8 +257,8 @@ class CloudflareDaemon {
               final token = args?['token'] as String?;
               final hostname = args?['hostname'] as String? ?? '';
               final port = args?['port'] as int?;
-              if (id == null || token == null || port == null) {
-                return {'ok': false, 'error': 'Missing tunnelId, token, or port'};
+              if (id == null || port == null) {
+                return {'ok': false, 'error': 'Missing tunnelId or port'};
               }
               if (_runners.containsKey(id)) { await _runners[id]!.stop(); }
               final runner = TunnelRunner(tunnelId: id, token: token, hostname: hostname, port: port, onEvent: _emit, maxRestarts: _maxStartRetries);
@@ -267,7 +267,6 @@ class CloudflareDaemon {
               return {'ok': true, 'pid': runner.pid};
             case 'tunnel_list':
               return {'ok': true, 'tunnels': _runners.values.map((r) => r.toJson()).toList()};
-            case 'tunnel_bind':
             case 'tunnel_logs':
               final id = args?['tunnelId'] as String?;
               final limit = args?['limit'] as int? ?? 50;
@@ -380,10 +379,10 @@ class CloudflareDaemon {
           if (r != null) {
             await r.stop();
             _runners.remove(id);
+            _sendIpc(client, {'ok': true});
+          } else {
+            _sendIpc(client, {'ok': false, 'error': 'Tunnel not found'});
           }
-          await CloudflaredService.deleteCredentialsFile(id);
-          await CloudflaredService.unregisterAppTunnel(id);
-          _sendIpc(client, {'ok': r != null});
           break;
 
         case 'tunnel_start':

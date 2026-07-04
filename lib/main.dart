@@ -16,6 +16,7 @@ import 'daemon/events.dart';
 import 'daemon/daemon.dart' as daemon_mod;
 import 'cloudflared_service.dart';
 import 'cloudflare_service.dart';
+import 'tunnel_operations.dart';
 import 'tunnel_health.dart';
 import 'latency_sparkline.dart';
 import 'tunnel_heatmap.dart';
@@ -237,6 +238,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   List<OpenPort> _openPorts = [];
   List<ActiveTunnel> _activeTunnels = [];
   List<Map<String, dynamic>> _remoteTunnels = [];
+  final Set<String> _busyTunnelIds = {};
   Map<String, Map<String, String>> _tunnelConfigs = {}; // tunnelId -> {hostname, service}
   Map<String, OpenPort> _tunnelLocalProcess = {};
   Map<int, OpenPort> _pidToLocalProcess = {};
@@ -265,6 +267,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   bool _isDaemonLoading = false;
   final DaemonClient _daemonClient = DaemonClient();
   final _appStorage = AppStorage.instance;
+
+  Future<Map<String, dynamic>> _ipcDaemon(String cmd, {Map<String, dynamic>? args}) async {
+    final client = DaemonClient();
+    if (!await client.connect()) return {'ok': false, 'error': 'Daemon not reachable'};
+    final result = await client.send(cmd, args: args);
+    client.disconnect();
+    return result;
+  }
 
   final _portsSearchController = TextEditingController();
   final _tunnelsSearchController = TextEditingController();
@@ -721,35 +731,29 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     String? tunnelId;
     try {
       _showToast('Creating tunnel...', isInfo: true);
-      final tunnelData = await CloudflareService.createTunnel('tunnel-$subdomain-$port');
-      if (tunnelData == null) throw Exception('Failed to create tunnel');
 
-      tunnelId = tunnelData['id'];
-      final tunnelToken = tunnelData['token'];
-      final id = tunnelId!;
+      final result = await TunnelOperations.quickBind(
+        token: await AppStorage.instance.read(key: CloudflareService.tokenKey) ?? '',
+        accountId: await AppStorage.instance.read(key: CloudflareService.accountIdKey) ?? '',
+        subdomain: subdomain,
+        zoneId: zone['id'],
+        zoneName: zone['name'],
+        port: port,
+        ipc: _ipcDaemon,
+      );
 
-      _showToast('Configuring routing...', isInfo: true);
-      final configured = await CloudflareService.configureTunnel(id, fullDomain, port);
-      if (!configured) throw Exception('Failed to configure tunnel routing');
+      if (result['ok'] != true) throw Exception(result['error'] ?? 'Unknown error');
 
-      _showToast('Creating DNS record...', isInfo: true);
-      final dnsCreated = await CloudflareService.createTunnelDnsRecord(zone['id'], subdomain, id);
-      if (!dnsCreated) throw Exception('Failed to create DNS record');
-
-      await CloudflaredService.registerAppTunnel(id, port, token: tunnelToken, hostname: fullDomain);
-
-      _showToast('Starting via daemon...', isInfo: true);
-
-      final client = DaemonClient();
-      if (!await client.connect()) throw Exception('Daemon not reachable');
-      final bindResult = await client.bindTunnel(id, tunnelToken, fullDomain, port);
-      client.disconnect();
-
-      if (bindResult['ok'] != true) {
-        throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
-      }
-
-      final daemonPid = bindResult['pid'] as int?;
+      final id = result['tunnelId'] as String;
+      tunnelId = id;
+      final tunnelToken = await CloudflaredService.readAppTunnelToken(id);
+      int? daemonPid;
+      try {
+        final status = await _ipcDaemon('status');
+        final tunnels = (status['tunnels'] as List?)?.cast<Map<String,dynamic>>() ?? [];
+        final mt = tunnels.where((t) => t['tunnelId'] == id).firstOrNull;
+        daemonPid = mt?['pid'] as int?;
+      } catch (_) {}
 
       _watcher.watch(
         tunnelId: id,
@@ -770,29 +774,26 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       setState(() => _activeTunnels.add(activeTunnel));
 
-      _fireWebhook(DaemonEventType.tunnelCreated, tunnelId: id, hostname: fullDomain, port: port);
-
       _showToast('Tunnel $fullDomain is active!');
       _fetchRemoteTunnels();
       Future.delayed(const Duration(seconds: 3), _checkTunnelConnectivity);
     } catch (e) {
       if (tunnelId != null) {
-        await CloudflaredService.unregisterAppTunnel(tunnelId);
-        await CloudflaredService.deleteCredentialsFile(tunnelId);
-        await CloudflareService.deleteTunnelDnsRecords(tunnelId);
-        await CloudflareService.deleteTunnel(tunnelId);
+        TunnelOperations.deleteTunnel(tunnelId: tunnelId!, ipc: _ipcDaemon).catchError((_) => <String, dynamic>{'ok': false});
       }
-      _showToast('Error: $e (rolled back)', isError: true);
+      _showToast('Error: $e', isError: true);
     }
   }
 
   Future<void> _stopTunnel(ActiveTunnel tunnel) async {
     final id = tunnel.tunnelId;
+    if (id != null && _busyTunnelIds.contains(id)) return;
+    if (id != null) _busyTunnelIds.add(id);
 
     bool killed = false;
     if (id != null) {
       try {
-        final result = await _daemonClient.unbindTunnel(id);
+        final result = await TunnelOperations.unbind(tunnelId: id, ipc: _ipcDaemon);
         killed = result['ok'] == true;
       } catch (_) {}
     }
@@ -821,6 +822,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       );
     }
     _showToast('Tunnel stopped', isInfo: true);
+    if (id != null) {
+      _busyTunnelIds.remove(id);
+      setState(() {});
+    }
   }
 
   Future<bool> _confirmDelete({String? title, String? message}) async {
@@ -967,30 +972,21 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
     try {
       _showToast('Reconfiguring tunnel...', isInfo: true);
-      final ok = await CloudflareService.configureTunnel(tunnelId, hostname, port);
-      if (!ok) throw Exception('Failed to reconfigure tunnel');
-
-      await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
 
       int? startPid;
-      if (token != null) {
-        if (!_isDaemonRunning) {
-          _showToast('Daemon is not running. Start it from the sidebar.', isError: true);
-          return;
-        }
+      if (_isDaemonRunning) {
         _showToast('Starting via daemon...', isInfo: true);
 
-        final client = DaemonClient();
-        if (!await client.connect()) throw Exception('Daemon not reachable');
-        final bindResult = await client.bindTunnel(tunnelId, token, hostname, port);
-        client.disconnect();
-
-        if (bindResult['ok'] != true) {
-          throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
-        }
+        final bindResult = await TunnelOperations.rebind(
+          tunnelId: tunnelId,
+          port: port,
+          hostname: hostname,
+          ipc: _ipcDaemon,
+        );
+        if (bindResult['ok'] != true) throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
         startPid = bindResult['pid'] as int?;
       } else {
-        _showToast('Starting cloudflared...', isInfo: true);
+        _showToast('Daemon not running, starting directly...', isInfo: true);
         final process = await CloudflaredService.startTunnelById(tunnelId);
         if (process == null) throw Exception('No credentials file found');
         startPid = process.pid;
@@ -1045,61 +1041,55 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   Future<void> _deleteTunnel({ActiveTunnel? tunnel, String? tunnelId, int? pid}) async {
-    final id = tunnel?.tunnelId ?? tunnelId;
+    final id = tunnelId ?? tunnel?.tunnelId;
+    if (id != null && _busyTunnelIds.contains(id)) return;
+    if (id != null) {
+      _busyTunnelIds.add(id);
+      setState(() {});
+    }
     if (id == null) return;
-    if (!await _confirmDelete()) return;
+    if (!await _confirmDelete()) { _busyTunnelIds.remove(id); setState(() {}); return; }
     _showToast('Deleting tunnel...', isInfo: true);
 
+    // Local process cleanup (UI-specific)
     if (tunnel != null) {
       tunnel.process?.kill();
       if (tunnel.tunnelId != null) {
         _tunnelLocalProcess.remove(tunnel.tunnelId!);
         _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
-        try { await _daemonClient.unbindTunnel(tunnel.tunnelId!); } catch (_) {}
       }
       setState(() => _activeTunnels.remove(tunnel));
     } else if (pid != null) {
       try {
         await CloudflaredService.forceKillPid(pid);
         _runningTunnels.removeWhere((t) => t.pid == pid);
-        if (tunnelId != null) {
-          try { await _daemonClient.unbindTunnel(tunnelId); } catch (_) {}
-        }
-      } catch (e) {
-      }
+      } catch (_) {}
     }
-
-    await CloudflaredService.saveServiceEnabled(id, false);
-    await CloudflaredService.unregisterAppTunnel(id);
-    await CloudflaredService.deleteCredentialsFile(id);
     _watcher.unwatch(id);
-    await CloudflareService.deleteTunnelDnsRecords(id);
-    final success = await CloudflareService.deleteTunnel(id);
-    if (success) {
-      _showToast('Tunnel and DNS record deleted.');
-      _fireWebhook(DaemonEventType.tunnelDeleted, tunnelId: id);
-    } else {
-      _showToast('Local tunnel stopped, but Cloudflare delete failed.', isError: true);
-    }
+
+    final result = await TunnelOperations.deleteTunnel(tunnelId: id, ipc: _ipcDaemon);
+    _showToast(result['ok'] == true ? 'Tunnel and DNS record deleted.' : 'Local tunnel stopped, but Cloudflare delete failed.', isError: result['ok'] != true);
     _fetchRemoteTunnels();
+    if (id != null) {
+      _busyTunnelIds.remove(id);
+      setState(() {});
+    }
   }
 
   Future<void> _deleteRemoteTunnel(String tunnelId) async {
+    if (_busyTunnelIds.contains(tunnelId)) return;
+    _busyTunnelIds.add(tunnelId); setState(() {});
     if (!await _confirmDelete(
       title: 'Delete tunnel from Cloudflare?',
       message: 'This will remove the tunnel and its DNS record from Cloudflare. Any running local cloudflared process for this tunnel will be orphaned.',
-    )) return;
+    )) { _busyTunnelIds.remove(tunnelId); setState(() {}); return; }
     _showToast('Deleting remote tunnel...', isInfo: true);
-    await CloudflareService.deleteTunnelDnsRecords(tunnelId);
-    await CloudflaredService.deleteCredentialsFile(tunnelId);
-    await CloudflaredService.unregisterAppTunnel(tunnelId);
-    final success = await CloudflareService.deleteTunnel(tunnelId);
-    if (success) {
-      _showToast('Tunnel and DNS record deleted.');
-      _fireWebhook(DaemonEventType.tunnelDeleted, tunnelId: tunnelId);
-    } else {
-      _showToast('Failed to delete tunnel.', isError: true);
-    }
+    final result = await TunnelOperations.deleteTunnel(
+      tunnelId: tunnelId,
+      ipc: (cmd, {args}) async => {'ok': true},
+    );
+    _showToast(result['ok'] == true ? 'Tunnel and DNS record deleted.' : 'Failed to delete tunnel.', isError: result['ok'] != true);
+    _busyTunnelIds.remove(tunnelId); setState(() {});
   }
 
   Future<void> _killOrphanedDaemons() async {
@@ -3017,12 +3007,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             IconButton(
               icon: const Icon(Icons.stop_circle, size: 28, color: Colors.redAccent),
               tooltip: 'Stop Tunnel',
-              onPressed: () => _stopTunnel(tunnel),
+              onPressed: (tunnelId != null && _busyTunnelIds.contains(tunnelId)) ? null : () => _stopTunnel(tunnel),
             ),
             IconButton(
               icon: const Icon(Icons.delete_outline, size: 24, color: Colors.redAccent),
               tooltip: 'Stop & Delete from Cloudflare',
-              onPressed: () => _deleteTunnel(tunnel: tunnel),
+              onPressed: (tunnelId != null && _busyTunnelIds.contains(tunnelId)) ? null : () => _deleteTunnel(tunnel: tunnel),
             ),
           ] else if (isLocal && pid != null) ...[
             IconButton(
@@ -3052,7 +3042,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             IconButton(
               icon: const Icon(Icons.stop_circle, size: 28, color: Colors.redAccent),
               tooltip: 'Kill external cloudflared process',
-              onPressed: () async {
+              onPressed: (tunnelId != null && _busyTunnelIds.contains(tunnelId)) ? null : () async {
+                if (tunnelId != null && _busyTunnelIds.contains(tunnelId)) return;
+                if (tunnelId != null) { _busyTunnelIds.add(tunnelId); setState(() {}); }
                 try {
                   if (tunnelId != null) {
                     final client = DaemonClient();
@@ -3077,13 +3069,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 } catch (e) {
                   _showToast('Failed to kill: $e', isError: true);
                 }
+                if (tunnelId != null) { _busyTunnelIds.remove(tunnelId); setState(() {}); }
               },
             ),
             if (tunnelId != null)
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 24, color: Colors.redAccent),
                 tooltip: 'Kill & Delete from Cloudflare',
-                onPressed: () => _deleteTunnel(tunnelId: tunnelId, pid: pid),
+                onPressed: _busyTunnelIds.contains(tunnelId) ? null : () => _deleteTunnel(tunnelId: tunnelId, pid: pid),
               ),
           ] else if (!isLocal && tunnelId != null) ...[
             IconButton(
@@ -3105,7 +3098,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
             IconButton(
               icon: const Icon(Icons.delete_outline, size: 24, color: Colors.redAccent),
               tooltip: 'Delete from Cloudflare',
-              onPressed: () => _deleteRemoteTunnel(tunnelId),
+              onPressed: _busyTunnelIds.contains(tunnelId) ? null : () => _deleteRemoteTunnel(tunnelId),
             ),
           ]
             ],

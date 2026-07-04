@@ -32,18 +32,23 @@ interface DnsZone { id: string; name: string; }
                 @for (tag of splitTags(t.tags); track tag) { <span class="tag-chip" [ngStyle]="getTagStyle(tag)">{{tag}}</span> }
                 @if (t.notes) { <span class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span> }
               </td><td class="muted">{{t.port||extractPort(t.service)||'-'}}</td><td><div class="action-cell">
-                <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)"><span class="material-icons" style="font-size:16px">edit_note</span></button>
+                <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">edit_note</span></button>
                 @if (t.state!=='inactive') {
-                  <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)" [style.color]="t.serviceEnabled?'var(--green)':''"><span class="material-icons" style="font-size:16px">shield</span></button>
-                  <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl('https://'+(t.hostname||''))"><span class="material-icons" style="font-size:16px">content_copy</span></button>
-                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))"><span class="material-icons" style="font-size:16px">qr_code</span></button>
-                  <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)"><span class="material-icons" style="font-size:16px">terminal</span></button>
-                  <button class="btn btn-ghost btn-xs" title="Stop" (click)="unbind(t.tunnelId)"><span class="material-icons" style="font-size:16px">stop_circle</span></button>
+                  <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)" [style.color]="t.serviceEnabled?'var(--green)':''" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">shield</span></button>
+                  <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">content_copy</span></button>
+                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                  <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">terminal</span></button>
+                  <button class="btn btn-ghost btn-xs" title="Stop" (click)="unbind(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">stop_circle</span></button>
                 } @else {
-                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))"><span class="material-icons" style="font-size:16px">qr_code</span></button>
-                  <button class="btn btn-primary btn-xs" (click)="quickBindExisting(t.tunnelId)">Bind</button>
+                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                  @if (bindTunnelId===t.tunnelId) {
+                    <input class="input" type="number" [(ngModel)]="bindPort" placeholder="Port" style="width:60px;padding:2px 6px;font-size:11px" (keyup.enter)="quickBindExisting(t.tunnelId)">
+                    <button class="btn btn-primary btn-xs" (click)="quickBindExisting(t.tunnelId)">Go</button>
+                  } @else {
+                    <button class="btn btn-primary btn-xs" (click)="bindTunnelId=t.tunnelId;bindPort=extractPort(t.service)||0" [disabled]="actingTunnelId()==t.tunnelId">Bind</button>
+                  }
                 }
-                <button class="btn btn-ghost btn-xs danger" title="Delete" (click)="deleteTunnel(t.tunnelId)"><span class="material-icons" style="font-size:16px">delete_outline</span></button>
+                <button class="btn btn-ghost btn-xs danger" title="Delete" (click)="deleteTunnel(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">delete_outline</span></button>
               </div></td></tr>
           }
         </tbody></table>
@@ -95,7 +100,9 @@ export class DashboardComponent implements OnInit {
   stoppedCount = computed(() => this.tunnels().filter(t=>t.state==='stopped'||t.state==='inactive').length);
   zones = signal<DnsZone[]>([]);
   showBind = false; bind = {subdomain:'',zoneId:'',port:0};
+  bindPort = 0; bindTunnelId = '';
   logsModal = signal(false); logLines = signal<string[]>([]);
+  actingTunnelId = signal('');
   editingNotes: string|null = null; notesText = ''; selectedTags: string[] = []; customTag = '';
   presetTags = ['prod','staging','dev','api','internal','testing','monitoring','backend','frontend','database','auth','webhook'];
   private _tagColors: Record<string,string> = {
@@ -120,13 +127,13 @@ export class DashboardComponent implements OnInit {
     if(!this.bind.subdomain||!this.bind.zoneId||!this.bind.port||!z) return this.toast.show('All fields required',true);
     this.loading.set(true); try { const r = await this.api.call('/api/bind','POST',{subdomain:this.bind.subdomain,zoneId:this.bind.zoneId,zoneName:z.name,port:+this.bind.port}); this.toast.show('Bound: '+r.url); this.showBind=false; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); }
   }
-  async quickBindExisting(tunnelId:string) { this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST'); this.toast.show('Tunnel bound'); this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); }}
-  async unbind(id:string) { if(!confirm('Unbind?'))return; this.loading.set(true); try{await this.api.call('/api/tunnels/'+id,'DELETE');this.toast.show('Unbound');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.loading.set(false);}}
-  async deleteTunnel(id:string) { if(!confirm('Delete from Cloudflare?'))return; this.loading.set(true); try{await this.api.call('/api/tunnels/'+id+'/delete','POST');this.toast.show('Deleted');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.loading.set(false);}}
-  async showLogs(id:string) { this.logsModal.set(true); this.logLines.set([]); this.loading.set(true); try{const r=await this.api.call('/api/logs/'+id+'?limit=100');this.logLines.set(r.logs||[]);}catch{this.logLines.set(['Error']);}finally{this.loading.set(false);}}
+  async quickBindExisting(tunnelId:string) { if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST',{port:this.bindPort||undefined}); this.toast.show('Tunnel bound'); this.bindTunnelId=''; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
+  async unbind(id:string) { if(this.actingTunnelId())return; if(!confirm('Unbind?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id,'DELETE');this.toast.show('Unbound');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
+  async deleteTunnel(id:string) { if(this.actingTunnelId())return; if(!confirm('Delete from Cloudflare?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id+'/delete','POST');this.toast.show('Deleted');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
+  async showLogs(id:string) { this.logsModal.set(true); this.logLines.set([]); this.actingTunnelId.set(id); try{const r=await this.api.call('/api/logs/'+id+'?limit=100');this.logLines.set(r.logs||[]);}catch{this.logLines.set(['Error']);}finally{this.actingTunnelId.set('');}}
   async copyUrl(url:string) { try{await navigator.clipboard.writeText(url);this.toast.show('Copied!');}catch{this.toast.show('Copy failed',true);}}
   async showQr(url:string) { this.modals.kind.set('qr'); this.modals.qrData.set(url); try { this.modals.qrDataUrl.set(await QRCode.toDataURL(url,{width:240,margin:2,color:{dark:'#0F172A',light:'#ffffff'}})); } catch { this.modals.qrDataUrl.set(''); } }
-  async toggleService(tunnelId:string,hostname:string) { this.loading.set(true); try { const t = this.tunnels().find(x=>x.tunnelId===tunnelId); const v = !(t?.serviceEnabled); await this.api.call('/api/tunnels/'+tunnelId+'/service','PUT',{enabled:v}); this.toast.show(v?'Auto-start enabled for '+hostname:'Auto-start disabled'); this.refreshTunnels(); } catch { this.toast.show('Error',true); } finally { this.loading.set(false); }}
+  async toggleService(tunnelId:string,hostname:string) { if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { const t = this.tunnels().find(x=>x.tunnelId===tunnelId); const v = !(t?.serviceEnabled); await this.api.call('/api/tunnels/'+tunnelId+'/service','PUT',{enabled:v}); this.toast.show(v?'Auto-start enabled for '+hostname:'Auto-start disabled'); this.refreshTunnels(); } catch { this.toast.show('Error',true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
   async saveNotes() { if(!this.editingNotes)return; this.loading.set(true); try { await this.api.call('/api/tunnels/'+this.editingNotes+'/notes','PUT',{notes:this.notesText,tags:this.selectedTags.join(',')}); this.toast.show('Saved'); this.editingNotes=null; this.refreshTunnels(); } catch { this.toast.show('Error',true); } finally { this.loading.set(false); }}
   togglePresetTag(tag:string) { const i=this.selectedTags.indexOf(tag); if(i>=0) this.selectedTags.splice(i,1); else { if(this.selectedTags.length>=5) return this.toast.show('Max 5 tags',true); this.selectedTags.push(tag); } this.selectedTags=[...this.selectedTags]; }
   addCustomTag() { const t=this.customTag.trim(); if(!t) return; if(this.selectedTags.length>=5) return this.toast.show('Max 5 tags',true); if(!this.selectedTags.includes(t)) this.selectedTags=[...this.selectedTags,t]; this.customTag=''; }

@@ -4,12 +4,14 @@ import 'dart:io';
 import 'dart:math';
 import 'ipc_client.dart';
 import 'cf_api_client.dart';
+import 'events.dart';
 import '../cloudflare_service.dart';
 import '../webhook_service.dart';
 import '../webhook_config.dart';
 import '../rate_alert_service.dart';
 import '../rate_alert.dart';
 import '../cloudflared_service.dart';
+import '../tunnel_operations.dart';
 import '../backup_restore_screen.dart';
 import '../app_storage.dart';
 
@@ -303,17 +305,16 @@ class HttpApiServer {
   }
 
   Future<void> _handleBindExisting(String tunnelId, HttpRequest request) async {
-    final fullMap = await CloudflaredService.readAppTunnelPortMapFull();
-    final cfg = fullMap[tunnelId];
-    final token = cfg?.token;
-    final port = cfg?.port ?? 0;
-    final hostname = cfg?.hostname ?? '';
-    if (token == null && !await CloudflaredService.credentialsFileExists(tunnelId)) {
-      _jsonResponse(request.response, 400, {'ok':false,'error':'No stored credentials for this tunnel'});
-      return;
-    }
-    final result = await _ipc('tunnel_bind', args: {'tunnelId':tunnelId, 'token':token??'', 'hostname':hostname, 'port':port});
-    _jsonResponse(request.response, result['ok']==true?200:500, result);
+    final body = await utf8.decodeStream(request);
+    Map<String, dynamic>? data;
+    try { data = json.decode(body); } catch (_) { data = {}; }
+    final result = await TunnelOperations.rebind(
+      tunnelId: tunnelId,
+      port: data?['port'] as int?,
+      hostname: data?['hostname'] as String?,
+      ipc: _ipc,
+    );
+    _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
   }
 
   Future<void> _handleBindTunnel(HttpRequest request) async {
@@ -323,21 +324,22 @@ class HttpApiServer {
     final token = data['token'] as String?;
     final hostname = data['hostname'] as String? ?? '';
     final port = data['port'] as int?;
-    if (tunnelId == null || token == null || port == null) {
-      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Missing required fields: tunnelId, token, port'});
+    if (tunnelId == null || port == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Missing required fields: tunnelId and port'});
       return;
     }
-    final result = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': token, 'hostname': hostname, 'port': port});
+    await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
+    final result = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': token ?? '', 'hostname': hostname, 'port': port});
     if (result['ok'] == true) {
-      await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
+      WebhookService.instance.triggerWebhooks(
+        DaemonEvent(type: DaemonEventType.tunnelStarted, tunnelId: tunnelId, hostname: hostname, port: port),
+      ).catchError((_) {});
     }
     _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
   }
 
   Future<void> _handleUnbindTunnel(String tunnelId, HttpResponse response) async {
-    final result = await _ipc('tunnel_unbind', args: {'tunnelId': tunnelId});
-    await CloudflaredService.deleteCredentialsFile(tunnelId);
-    await CloudflaredService.unregisterAppTunnel(tunnelId);
+    final result = await TunnelOperations.unbind(tunnelId: tunnelId, ipc: _ipc);
     _jsonResponse(response, result['ok'] == true ? 200 : 404, result);
   }
 
@@ -365,55 +367,19 @@ class HttpApiServer {
       return;
     }
 
-    final token = await CfApiClient.getToken();
-    final accountId = await CfApiClient.accountId();
+    final token = await AppStorage.instance.read(key: CloudflareService.tokenKey);
+    final accountId = await AppStorage.instance.read(key: CloudflareService.accountIdKey);
     if (token == null || token.isEmpty || accountId == null) {
-      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Cloudflare API not configured. POST /cf-config first.'});
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Cloudflare API not configured'});
       return;
     }
 
-    final hostname = '$subdomain.$zoneName';
-
-    // 1. Create tunnel on Cloudflare
-    final tunnelData = await CfApiClient.createTunnel('tunnel-$subdomain-$port');
-    if (tunnelData == null) {
-      _jsonResponse(request.response, 500, {'ok': false, 'error': 'Failed to create tunnel'});
-      return;
-    }
-    final tunnelId = tunnelData['id'] as String;
-    final tunnelToken = tunnelData['token'] as String?;
-    if (tunnelId.isEmpty || tunnelToken == null) {
-      _jsonResponse(request.response, 500, {'ok': false, 'error': 'Invalid tunnel response'});
-      return;
-    }
-
-    // 2. Configure ingress
-    final configured = await CfApiClient.configureTunnel(tunnelId, zoneId, hostname, port);
-    if (!configured) {
-      _jsonResponse(request.response, 500, {'ok': false, 'error': 'Failed to configure tunnel routing'});
-      return;
-    }
-
-    // 3. Create DNS record
-    final dnsOk = await CfApiClient.createDnsRecord(zoneId, hostname, tunnelId);
-    if (!dnsOk) {
-      _jsonResponse(request.response, 500, {'ok': false, 'error': 'Failed to create DNS record'});
-      return;
-    }
-
-    // 4. Bind via daemon
-    final bindResult = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': tunnelToken, 'hostname': hostname, 'port': port});
-    if (bindResult['ok'] == true) {
-      await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken, hostname: hostname);
-      _jsonResponse(request.response, 200, {
-        'ok': true,
-        'tunnelId': tunnelId,
-        'hostname': hostname,
-        'url': 'https://$hostname',
-      });
-    } else {
-      _jsonResponse(request.response, 500, {'ok': false, 'error': 'Tunnel created on Cloudflare but daemon bind failed: ${bindResult['error']}'});
-    }
+    final result = await TunnelOperations.quickBind(
+      token: token, accountId: accountId,
+      subdomain: subdomain, zoneId: zoneId, zoneName: zoneName, port: port,
+      ipc: _ipc,
+    );
+    _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
   }
 
   // ---- Webhooks CRUD ----
@@ -671,11 +637,8 @@ class HttpApiServer {
   }
 
   Future<void> _handleDeleteTunnel(String tunnelId, HttpResponse response) async {
-    await CloudflaredService.unregisterAppTunnel(tunnelId);
-    await CloudflaredService.deleteCredentialsFile(tunnelId);
-    final dnsOk = await CloudflareService.deleteTunnelDnsRecords(tunnelId);
-    final tunnelOk = await CloudflareService.deleteTunnel(tunnelId);
-    _jsonResponse(response, 200, {'ok': tunnelOk, 'dnsDeleted': dnsOk});
+    final result = await TunnelOperations.deleteTunnel(tunnelId: tunnelId, ipc: _ipc);
+    _jsonResponse(response, 200, result);
   }
 
   Future<void> _handleZones(HttpResponse response) async {
