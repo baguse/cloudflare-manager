@@ -380,10 +380,10 @@ class CloudflareDaemon {
           if (r != null) {
             await r.stop();
             _runners.remove(id);
-            _sendIpc(client, {'ok': true});
-          } else {
-            _sendIpc(client, {'ok': false, 'error': 'Tunnel not found'});
           }
+          await CloudflaredService.deleteCredentialsFile(id);
+          await CloudflaredService.unregisterAppTunnel(id);
+          _sendIpc(client, {'ok': r != null});
           break;
 
         case 'tunnel_start':

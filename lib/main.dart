@@ -538,6 +538,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         _isLoadingRemoteTunnels = false;
       });
     }
+    await _syncWatchedTunnels();
     _checkTunnelConnectivity();
   }
 
@@ -608,6 +609,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       _watcher.isEnabled ? 'Watcher enabled' : 'Watcher disabled',
       isInfo: true,
     );
+  }
+
+  Future<void> _syncWatchedTunnels() async {
+    final appMap = await CloudflaredService.readAppTunnelPortMapFull();
+    for (final id in _watcher.watched.keys.toList()) {
+      if (!appMap.containsKey(id)) _watcher.unwatch(id);
+    }
   }
 
   Future<void> _restoreWatchedTunnels() async {
@@ -3046,11 +3054,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
               tooltip: 'Kill external cloudflared process',
               onPressed: () async {
                 try {
+                  if (tunnelId != null) {
+                    final client = DaemonClient();
+                    await client.connect().timeout(const Duration(seconds: 3)).catchError((_) => false);
+                    await client.unbindTunnel(tunnelId).timeout(const Duration(seconds: 5)).catchError((_) => <String, dynamic>{});
+                    client.disconnect();
+                  }
                   await CloudflaredService.forceKillPid(pid);
                   if (tunnelId != null) {
                     _watcher.unwatch(tunnelId!);
                     _tunnelLocalProcess.remove(tunnelId);
-                    _daemonClient.unbindTunnel(tunnelId).catchError((_) => <String, dynamic>{});
                     final cfg = _tunnelConfigs[tunnelId];
                     _fireWebhook(DaemonEventType.tunnelStopped,
                       tunnelId: tunnelId,

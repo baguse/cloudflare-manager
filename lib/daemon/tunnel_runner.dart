@@ -21,6 +21,7 @@ class TunnelRunner {
   Timer? _healthTimer;
   Timer? _restartTimer;
   int _restartCount = 0;
+  bool _explicitlyStopped = false;
   static const _baseDelay = Duration(seconds: 2);
   DateTime? _startedAt;
 
@@ -41,6 +42,7 @@ class TunnelRunner {
 
   Future<void> start() async {
     if (_state == TunnelRunState.running) return;
+    _explicitlyStopped = false;
     _state = TunnelRunState.starting;
 
     try {
@@ -71,6 +73,7 @@ class TunnelRunner {
       });
 
       _process!.exitCode.then((code) {
+        if (_explicitlyStopped) return;
         if (_state == TunnelRunState.running) {
           _state = TunnelRunState.crashed;
           onEvent(DaemonEvent(
@@ -99,6 +102,7 @@ class TunnelRunner {
   }
 
   Future<void> stop() async {
+    _explicitlyStopped = true;
     _state = TunnelRunState.stopped;
     _healthTimer?.cancel();
     _restartTimer?.cancel();
@@ -121,6 +125,7 @@ class TunnelRunner {
   }
 
   void _scheduleRestart() {
+    if (_explicitlyStopped) return;
     if (_restartCount >= maxRestarts) {
       _addLog('Max restarts ($maxRestarts) reached, giving up.');
       return;
@@ -130,6 +135,7 @@ class TunnelRunner {
     _addLog('Restarting in ${delay.inSeconds}s (attempt $_restartCount/$maxRestarts)...');
     _restartTimer?.cancel();
     _restartTimer = Timer(delay, () {
+      if (_explicitlyStopped) return;
       if (_state == TunnelRunState.crashed) {
         onEvent(DaemonEvent(
           type: DaemonEventType.tunnelReconnected,

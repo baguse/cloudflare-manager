@@ -336,6 +336,8 @@ class HttpApiServer {
 
   Future<void> _handleUnbindTunnel(String tunnelId, HttpResponse response) async {
     final result = await _ipc('tunnel_unbind', args: {'tunnelId': tunnelId});
+    await CloudflaredService.deleteCredentialsFile(tunnelId);
+    await CloudflaredService.unregisterAppTunnel(tunnelId);
     _jsonResponse(response, result['ok'] == true ? 200 : 404, result);
   }
 
