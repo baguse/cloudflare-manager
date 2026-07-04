@@ -31,7 +31,7 @@ interface DnsZone { id: string; name: string; }
               <td>{{t.hostname||'-'}}
                 @for (tag of splitTags(t.tags); track tag) { <span class="tag-chip" [ngStyle]="getTagStyle(tag)">{{tag}}</span> }
                 @if (t.notes) { <span class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span> }
-              </td><td class="muted">{{t.state==='inactive'?t.service||'-':(t.port||'-')}}</td><td><div class="action-cell">
+              </td><td class="muted">{{t.port||extractPort(t.service)||'-'}}</td><td><div class="action-cell">
                 <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)"><span class="material-icons" style="font-size:16px">edit_note</span></button>
                 @if (t.state!=='inactive') {
                   <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)" [style.color]="t.serviceEnabled?'var(--green)':''"><span class="material-icons" style="font-size:16px">shield</span></button>
@@ -111,6 +111,7 @@ export class DashboardComponent implements OnInit {
   async _loadZones() { try { const r = await this.api.call('/api/zones'); this.zones.set(r.zones||[]); } catch {} }
 
   stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':s==='inactive'?'badge-gray':'badge-gray'; }
+  extractPort(s?:string) { if(!s)return null; const m=s.match(/:(\d+)$/); return m?+m[1]:null; }
   getTagStyle(tag:string) { const c = this._tagColors[tag.toLowerCase()] || '#6366F1'; return {'background': c+'26', 'color': c, 'border-color': c+'66'}; }
   splitTags(tags?:string): string[] { return (tags||'').split(',').map(t=>t.trim()).filter(t=>t.length>0); }
 
