@@ -467,6 +467,7 @@ class CloudflareDaemon {
     }
 
     onEvent?.call(event);
+    _apiServer?.broadcastEvent(event);
     
     final future = WebhookService.instance.triggerWebhooks(event).catchError((e) {
       _log('[daemon] Webhook trigger error: $e');

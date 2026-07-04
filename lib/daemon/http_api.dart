@@ -21,8 +21,10 @@ class HttpApiServer {
   HttpServer? _server;
   Future<Map<String, dynamic>> Function()? onGetStatusDirect;
   Future<Map<String, dynamic>> Function(String cmd, Map<String, dynamic>? args)? onIpcCall;
+  void Function(DaemonEvent event)? onDaemonEvent;
+  final List<WebSocket> _wsClients = [];
 
-  HttpApiServer({this.port = 9845, required this.apiKey, this.onGetStatusDirect, this.onIpcCall});
+  HttpApiServer({this.port = 9845, required this.apiKey, this.onGetStatusDirect, this.onIpcCall, this.onDaemonEvent});
 
   Future<void> start() async {
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
@@ -35,9 +37,36 @@ class HttpApiServer {
   }
 
   Future<void> stop() async {
+    for (final ws in _wsClients) { try { ws.close(); } catch (_) {} }
+    _wsClients.clear();
     await _server?.close(force: true);
     _server = null;
     print('[api] HTTP API stopped');
+  }
+
+  void broadcastEvent(DaemonEvent event) {
+    final json = jsonEncode(event.toJson());
+    final dead = <WebSocket>[];
+    for (final ws in _wsClients) {
+      try { ws.add(json); } catch (_) { dead.add(ws); }
+    }
+    _wsClients.removeWhere((w) => dead.contains(w));
+  }
+
+  Future<void> _handleWebSocket(HttpRequest request) async {
+    final token = request.uri.queryParameters['token'];
+    if (token == null || token != apiKey) {
+      _jsonResponse(request.response, 401, {'error': 'Unauthorized'});
+      return;
+    }
+    final ws = await WebSocketTransformer.upgrade(request);
+    _wsClients.add(ws);
+    ws.listen(
+      (_) {}, // ignore incoming messages
+      onDone: () => _wsClients.remove(ws),
+      onError: (_) => _wsClients.remove(ws),
+      cancelOnError: true,
+    );
   }
 
   Future<Map<String, dynamic>> _ipc(String cmd, {Map<String, dynamic>? args}) async {
@@ -70,10 +99,9 @@ class HttpApiServer {
       return;
     }
 
-    // Serve static files from web/dist
-    if (method == 'GET' && (routePath.startsWith('/output.css') || routePath.startsWith('/angular/'))) {
-      _serveStatic(request.response, routePath);
-      return;
+    // Serve static files from web/dist (JS, CSS, favicon, etc.)
+    if (method == 'GET' && routePath.isNotEmpty && !routePath.startsWith('/api')) {
+      if (_serveStatic(request.response, routePath)) return;
     }
 
     // Swagger / OpenAPI docs - no auth required
@@ -89,6 +117,12 @@ class HttpApiServer {
     // Health check - no auth required
     if (method == 'GET' && routePath == '/health') {
       _handleHealth(request.response);
+      return;
+    }
+
+    // WebSocket for real-time daemon events
+    if (method == 'GET' && routePath == '/ws') {
+      await _handleWebSocket(request);
       return;
     }
 
@@ -698,27 +732,33 @@ class HttpApiServer {
     return candidates.first;
   }
 
-  void _serveStatic(HttpResponse response, String path) {
+  bool _serveStatic(HttpResponse response, String path) {
     final webDir = _webDistDir;
 
     final file = File('$webDir$path');
-    if (!file.existsSync()) {
-      response.statusCode = 404;
-      response.close();
-      return;
-    }
+    if (!file.existsSync()) return false;
 
     final contentType = path.endsWith('.css')
         ? ContentType('text', 'css', charset: 'utf-8')
         : path.endsWith('.js')
             ? ContentType('application', 'javascript', charset: 'utf-8')
-            : ContentType.binary;
+            : path.endsWith('.html')
+                ? ContentType('text', 'html', charset: 'utf-8')
+                : path.endsWith('.svg')
+                    ? ContentType('image', 'svg+xml')
+                    : ContentType.binary;
 
     _corsHeaders(response);
     response.headers.contentType = contentType;
     response.statusCode = 200;
-    response.write(file.readAsStringSync());
+    final isText = path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.html') || path.endsWith('.svg');
+    if (isText) {
+      response.write(file.readAsStringSync());
+    } else {
+      response.add(file.readAsBytesSync());
+    }
     response.close();
+    return true;
   }
 
   void _serveWebDashboard(HttpResponse response) {

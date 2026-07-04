@@ -99,7 +99,7 @@ export class AppComponent implements OnInit {
   constructor(api: ApiService, private router: Router) { this.api = api; }
   ngOnInit() {
     document.documentElement.className = 'dark';
-    if (this.api.configured) { this.connected.set(true); this.checkStatus(); }
+    if (this.api.configured) { this.connected.set(true); this.checkStatus(); this.router.navigateByUrl('/'); }
     window.addEventListener('resize', () => this.sidebarCollapsed.set(window.innerWidth < 900));
   }
 

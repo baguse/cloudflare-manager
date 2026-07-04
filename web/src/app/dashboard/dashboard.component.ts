@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { Component, OnInit, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../api.service';
@@ -110,6 +110,11 @@ export class DashboardComponent implements OnInit {
     api:'#7C4DFF',internal:'#00ACC1',testing:'#43A047',monitoring:'#FDD835',backend:'#1E88E5',
     frontend:'#43A047',database:'#8E24AA',auth:'#E53935',webhook:'#FF8F00',
   };
+
+  private _init = effect(() => {
+    this.api.eventCount(); // track
+    this.refreshTunnels();
+  });
 
   ngOnInit() { this.refreshAll(); }
 
