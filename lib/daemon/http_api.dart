@@ -331,12 +331,15 @@ class HttpApiServer {
 
   Future<void> _handleBindExisting(String tunnelId, HttpRequest request) async {
     final body = await utf8.decodeStream(request);
-    Map<String, dynamic>? data;
-    try { data = json.decode(body); } catch (_) { data = {}; }
+    Map<String, dynamic> data;
+    try { data = json.decode(body); } catch (_) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Invalid JSON body'});
+      return;
+    }
     final result = await TunnelOperations.rebind(
       tunnelId: tunnelId,
-      port: data?['port'] as int?,
-      hostname: data?['hostname'] as String?,
+      port: data['port'] as int?,
+      hostname: data['hostname'] as String?,
       ipc: _ipc,
     );
     _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
