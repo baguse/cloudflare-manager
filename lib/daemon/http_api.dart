@@ -105,14 +105,14 @@ class HttpApiServer {
 
     // Serve web dashboard at /
     if (method == 'GET' && (routePath == '/' || routePath == '/index.html')) {
-      _serveWebDashboard(request.response);
+      await _serveWebDashboard(request.response);
       return;
     }
 
     // Serve static files + SPA fallback (only for non-API paths)
     if (method == 'GET' && !path.startsWith('/api/') && path != '/api') {
       if (await _serveStatic(request.response, routePath)) return;
-      _serveWebDashboard(request.response);
+      await _serveWebDashboard(request.response);
       return;
     }
 
@@ -747,14 +747,14 @@ class HttpApiServer {
     }
 
     final file = File('$webDir/index.html');
-    if (!file.existsSync()) {
+    if (!await file.exists()) {
       response.statusCode = 404;
       response.write('Web dashboard not built. Run: cd web && npm install && npm run build');
       response.close();
       return;
     }
 
-    final html = file.readAsStringSync();
+    final html = await file.readAsString();
     response.headers.contentType = ContentType.html;
     response.statusCode = 200;
     response.write(html);
