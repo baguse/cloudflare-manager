@@ -67,9 +67,25 @@ fi
 echo "=== Creating launch script ==="
 cat > "$DEB_ROOT/usr/bin/$NAME" << LAUNCH
 #!/bin/sh
-exec /usr/lib/$NAME/$BINARY "\$@"
+# cloudflare-manager — CLI + GUI wrapper
+# CLI commands: status, stop, restart, api-key, setup, --version
+# Daemon:       daemon start
+# GUI:          (no args) or --hidden
+
+if [ "\$1" = "daemon" ] && [ "\$2" = "start" ]; then
+  exec /usr/lib/$NAME/$BINARY daemon start
+elif [ "\$#" -gt 0 ] && [ "\$1" != "--hidden" ]; then
+  exec /usr/lib/$NAME/$BINARY "\$@"
+else
+  exec /usr/lib/$NAME/$BINARY "\$@"
+fi
 LAUNCH
 chmod +x "$DEB_ROOT/usr/bin/$NAME"
+
+echo "=== Installing systemd service file ==="
+SYSTEMD_USER_DIR="$DEB_ROOT/usr/lib/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+cp "$PROJECT_DIR/scripts/cloudflare-manager.service" "$SYSTEMD_USER_DIR/$NAME.service"
 
 echo "=== Creating .desktop entry ==="
 cat > "$DEB_ROOT/usr/share/applications/$NAME.desktop" << DESKTOP
@@ -117,6 +133,15 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database /usr/share/applications || true
+fi
+# Enable user systemd service on first login (lingering + enable)
+if [ -d /usr/lib/systemd/user ]; then
+  for SVC in /usr/lib/systemd/user/cloudflare-manager.service; do
+    if [ -f "\$SVC" ]; then
+      mkdir -p /etc/systemd/user/default.target.wants 2>/dev/null || true
+      ln -sf "\$SVC" /usr/lib/systemd/user/default.target.wants/ 2>/dev/null || true
+    fi
+  done
 fi
 POSTINST
   chmod +x "$DEB_CONTROL/postinst"
