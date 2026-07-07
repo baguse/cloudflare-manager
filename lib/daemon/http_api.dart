@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'ipc_client.dart';
 import 'cf_api_client.dart';
 import 'events.dart';
@@ -17,19 +18,26 @@ import '../app_storage.dart';
 
 class HttpApiServer {
   final int port;
-  final String apiKey;
+  final String _hash;
+  final String _prefix;
   HttpServer? _server;
   Future<Map<String, dynamic>> Function()? onGetStatusDirect;
   Future<Map<String, dynamic>> Function(String cmd, Map<String, dynamic>? args)? onIpcCall;
   void Function(DaemonEvent event)? onDaemonEvent;
   final List<WebSocket> _wsClients = [];
 
-  HttpApiServer({this.port = 9845, required this.apiKey, this.onGetStatusDirect, this.onIpcCall, this.onDaemonEvent});
+  static String hashKey(String key) {
+    return sha256.convert(utf8.encode(key)).toString();
+  }
+
+  HttpApiServer({this.port = 9845, required String apiKey, this.onGetStatusDirect, this.onIpcCall, this.onDaemonEvent})
+    : _hash = hashKey(apiKey),
+      _prefix = apiKey.substring(0, 4);
 
   Future<void> start() async {
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
     print('[api] HTTP API listening on http://0.0.0.0:$port');
-    print('[api] Use header: Authorization: Bearer $apiKey');
+    print('[api] Auth key prefix: $_prefix...');
 
     await for (final request in _server!) {
       _handleRequest(request);
@@ -54,15 +62,17 @@ class HttpApiServer {
   }
 
   Future<void> _handleWebSocket(HttpRequest request) async {
+    final auth = request.headers.value('Authorization');
     final token = request.uri.queryParameters['token'];
-    if (token == null || token != apiKey) {
+    final key = auth?.startsWith('Bearer ') == true ? auth!.substring(7) : token;
+    if (key == null || hashKey(key) != _hash) {
       _jsonResponse(request.response, 401, {'error': 'Unauthorized'});
       return;
     }
     final ws = await WebSocketTransformer.upgrade(request);
     _wsClients.add(ws);
     ws.listen(
-      (_) {}, // ignore incoming messages
+      (_) {},
       onDone: () => _wsClients.remove(ws),
       onError: (_) => _wsClients.remove(ws),
       cancelOnError: true,
@@ -255,7 +265,8 @@ class HttpApiServer {
   bool _checkAuth(HttpRequest request) {
     final auth = request.headers.value('Authorization');
     if (auth == null) return false;
-    return auth == 'Bearer $apiKey';
+    final key = auth.startsWith('Bearer ') ? auth.substring(7) : auth;
+    return hashKey(key) == _hash;
   }
 
   void _handleHealth(HttpResponse response) {

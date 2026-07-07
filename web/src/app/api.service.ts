@@ -18,6 +18,12 @@ export class ApiService {
     this.startWs();
   }
 
+  disconnect() {
+    this._ws?.close(); this._ws = null;
+    this._url.set(''); this._key.set('');
+    localStorage.removeItem('cf_url'); localStorage.removeItem('cf_key');
+  }
+
   startWs() { this._startWs(); }
 
   async call(path: string, method = 'GET', data?: any): Promise<any> {

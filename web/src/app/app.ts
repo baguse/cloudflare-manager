@@ -34,6 +34,7 @@ import { ToastService } from './toast.service';
           }
           <div class="spacer"></div>
           <button class="theme-btn" (click)="toggleTheme()"><span class="material-icons" style="font-size:16px">{{theme()==='dark'?'dark_mode':'light_mode'}}</span></button>
+          <button class="theme-btn" (click)="logout()" title="Logout" style="color:var(--red)"><span class="material-icons" style="font-size:16px">logout</span></button>
           <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>@if (!sidebarCollapsed()) { {{connLabel()}} }</div>
         </aside>
         <main class="main" [class.main-expanded]="sidebarCollapsed()">
@@ -89,6 +90,12 @@ export class AppComponent implements OnInit {
   }
 
   connect() { this.api.connect(this.url, this.key); this.connected.set(true); this.router.navigateByUrl('/'); }
+
+  logout() {
+    this.api.disconnect();
+    this.connected.set(false);
+    this.router.navigateByUrl('/');
+  }
 
   toggleTheme() { this.theme.set(this.theme() === 'dark' ? 'light' : 'dark'); localStorage.setItem('cf_theme', this.theme()); document.documentElement.className = this.theme(); }
 

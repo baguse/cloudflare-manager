@@ -67,6 +67,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return String.fromCharCodes(List.generate(length, (_) => r.nextInt(26) + 97));
   }
 
+  Future<void> _regenerateApiKey() async {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final keyFile = File('$home/.cloudflared/api-key');
+    final newKey = 'cm_${_randomString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    await keyFile.parent.create(recursive: true);
+    await keyFile.writeAsString(newKey);
+    setState(() => _apiKey = newKey);
+    _showSnack('API key regenerated. Copy it now — it won\'t be shown again.', Colors.orange);
+    // Restart API server to pick up new key
+    try {
+      final client = DaemonClient();
+      if (await client.connect()) {
+        await client.send('api_restart');
+        client.disconnect();
+      }
+    } catch (_) {}
+    if (_apiServer != null) {
+      await _apiServer?.stop();
+      _apiServer = HttpApiServer(port: _apiPort, apiKey: _apiKey!);
+      await _apiServer?.start();
+    }
+  }
+
   Future<void> _toggleApi(bool enabled) async {
     setState(() => _apiEnabled = enabled);
     await _storage.write(key: 'api_enabled', value: enabled.toString());
@@ -393,6 +416,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               _showSnack('API key copied', Colors.grey);
                             },
                             tooltip: 'Copy API key',
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.refresh, size: 16, color: Colors.orange),
+                            onPressed: _regenerateApiKey,
+                            tooltip: 'Regenerate API key',
                           ),
                         ],
                       ),
