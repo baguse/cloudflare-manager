@@ -271,6 +271,17 @@ class HttpApiServer {
     return hashKey(key) == _hash;
   }
 
+  /// Parse JSON body, returning null + 400 response on failure.
+  Future<Map<String, dynamic>?> _parseBody(HttpRequest request) async {
+    try {
+      final body = await utf8.decodeStream(request);
+      return json.decode(body);
+    } catch (_) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Invalid JSON body'});
+      return null;
+    }
+  }
+
   void _handleHealth(HttpResponse response) {
     _jsonResponse(response, 200, {'ok': true, 'service': 'cloudflare-manager-api'});
   }
@@ -364,9 +375,9 @@ class HttpApiServer {
   }
 
   Future<void> _handleQuickBind(HttpRequest request) async {
-    final body = await utf8.decodeStream(request);
-    final data = json.decode(body) as Map<String, dynamic>;
-    final subdomain = data['subdomain'] as String?;
+    final data = await _parseBody(request);
+    if (data == null) return;
+    final subdomain = data!['subdomain'] as String?;
     final zoneId = data['zoneId'] as String?;
     final zoneName = data['zoneName'] as String?;
     final port = data['port'] as int?;
@@ -444,7 +455,8 @@ class HttpApiServer {
   }
 
   Future<void> _handleCreateDns(HttpRequest request) async {
-    final body = json.decode(await utf8.decodeStream(request));
+    final body = await _parseBody(request);
+    if (body == null) return;
     final zoneId = body['zoneId'] as String?;
     final type = body['type'] as String?;
     final name = body['name'] as String?;
@@ -463,7 +475,8 @@ class HttpApiServer {
   }
 
   Future<void> _handleUpdateDns(HttpRequest request) async {
-    final body = json.decode(await utf8.decodeStream(request));
+    final body = await _parseBody(request);
+    if (body == null) return;
     final zoneId = body['zoneId'] as String?;
     final recordId = body['recordId'] as String?;
     if (zoneId == null || recordId == null) {
@@ -506,7 +519,8 @@ class HttpApiServer {
   }
 
   Future<void> _handleCreateRateAlert(HttpRequest request) async {
-    final body = json.decode(await utf8.decodeStream(request));
+    final body = await _parseBody(request);
+    if (body == null) return;
     final alert = RateAlertConfig.fromJson(body);
     await RateAlertService.instance.loadAlerts();
     await RateAlertService.instance.addAlert(alert);
@@ -577,7 +591,8 @@ class HttpApiServer {
   }
 
   Future<void> _handlePatchSettings(HttpRequest request) async {
-    final body = json.decode(await utf8.decodeStream(request));
+    final body = await _parseBody(request);
+    if (body == null) return;
     for (final entry in (body as Map<String, dynamic>).entries) {
       final newVal = entry.value?.toString();
       final oldVal = await AppStorage.instance.read(key: entry.key);
@@ -636,7 +651,8 @@ class HttpApiServer {
   }
 
   Future<void> _handleToggleService(String tunnelId, HttpRequest request) async {
-    final body = json.decode(await utf8.decodeStream(request));
+    final body = await _parseBody(request);
+    if (body == null) return;
     final enabled = body['enabled'] == true;
     await CloudflaredService.saveServiceEnabled(tunnelId, enabled);
     _jsonResponse(request.response, 200, {'ok': true, 'serviceEnabled': enabled});
@@ -661,7 +677,8 @@ class HttpApiServer {
   }
 
   Future<void> _handleCfConfig(HttpRequest request) async {
-    final body = json.decode(await utf8.decodeStream(request));
+    final body = await _parseBody(request);
+    if (body == null) return;
     final token = body['token'] as String?;
     final accountId = body['accountId'] as String?;
     if (token == null || accountId == null) {
