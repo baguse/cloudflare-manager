@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, computed, inject, effect } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, inject, effect, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../api.service';
@@ -88,10 +88,11 @@ interface DnsZone { id: string; name: string; }
     }
   `,
 })
-export class DashboardComponent implements OnInit {
+export class DashboardComponent implements OnInit, OnDestroy {
   private api = inject(ApiService);
   private toast = inject(ToastService);
   private modals = inject(ModalService);
+  private destroyRef = inject(DestroyRef);
   loading = signal(false);
   error = signal('');
   tunnels = signal<Tunnel[]>([]);
@@ -112,11 +113,12 @@ export class DashboardComponent implements OnInit {
   };
 
   private _init = effect(() => {
-    this.api.eventCount(); // track
+    this.api.eventCount();
     this.refreshTunnels();
   });
 
-  ngOnInit() { this.refreshAll(); }
+  ngOnInit() { this.refreshAll(); this.destroyRef.onDestroy(() => this._init.destroy()); }
+  ngOnDestroy() {}
 
   async refreshAll() { this.loading.set(true); this.error.set(''); try { await this.refreshTunnels(); await this._loadZones(); } catch {} finally { this.loading.set(false); } }
   async refreshTunnels() { try { const r = await this.api.call('/api/tunnels/all'); this.tunnels.set(r.tunnels||[]); } catch(e:any) { this.error.set(e.error||'Connection failed'); this.tunnels.set([]); }}
