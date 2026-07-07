@@ -56,7 +56,7 @@ const ALL_TRIGGERS = [
           </div>
           <label class="field-label">Headers (JSON, optional)</label>
           <textarea class="input" [(ngModel)]="form.headersStr" rows="2" placeholder='{"Authorization":"Bearer ..."}' style="resize:vertical;width:100%;box-sizing:border-box;font-family:monospace;font-size:11px"></textarea>
-          <label class="field-label">Body Template <span style="font-size:10px;font-weight:400;color:var(--muted)">Supports [event], [tunnelId], etc.</span></label>
+          <label class="field-label">Body Template <span style="font-size:10px;font-weight:400;color:var(--muted)" ngNonBindable>Supports: {{event}}, {{tunnelId}}, {{hostname}}, {{port}}, {{reason}}, {{error}}, {{timestamp}}</span></label>
           <textarea class="input" [(ngModel)]="form.bodyTemplate" rows="3" placeholder="Custom JSON body (leave empty for default)" style="resize:vertical;width:100%;box-sizing:border-box;font-family:monospace;font-size:11px"></textarea>
         } @else if (form.type==='slack'||form.type==='discord') {
           <input class="input" [(ngModel)]="form.webhookUrl" [placeholder]="form.type==='slack'?'Slack Webhook URL':'Discord Webhook URL'" style="width:100%;margin-top:12px">
