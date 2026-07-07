@@ -82,11 +82,6 @@ class TunnelOperations {
 
     // Bind via daemon
     final result = await ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': cfg?.token ?? '', 'hostname': effectiveHostname, 'port': effectivePort});
-    if (result['ok'] == true) {
-      WebhookService.instance.triggerWebhooks(
-        DaemonEvent(type: DaemonEventType.tunnelStarted, tunnelId: tunnelId, hostname: effectiveHostname, port: effectivePort),
-      ).catchError((_) {});
-    }
     return result;
   }
 
@@ -95,13 +90,7 @@ class TunnelOperations {
     required String tunnelId,
     required IpcCall ipc,
   }) async {
-    final result = await ipc('tunnel_unbind', args: {'tunnelId': tunnelId});
-    if (result['ok'] == true) {
-      WebhookService.instance.triggerWebhooks(
-        DaemonEvent(type: DaemonEventType.tunnelStopped, tunnelId: tunnelId),
-      ).catchError((_) {});
-    }
-    return result;
+    return await ipc('tunnel_unbind', args: {'tunnelId': tunnelId});
   }
 
   /// Full delete — stops daemon, cleans up local files, deletes from Cloudflare.
