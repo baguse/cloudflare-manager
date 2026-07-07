@@ -186,6 +186,11 @@ class TunnelRunner {
   }
 
   static Future<String> _findCloudflared() async {
+    // Delegate to CloudflaredService which has a more thorough search
+    if (await CloudflaredService.isInstalled()) {
+      return CloudflaredService.resolvedPath;
+    }
+    // Fallback: try common paths
     const paths = [
       'cloudflared',
       '/usr/local/bin/cloudflared',
@@ -206,7 +211,7 @@ class TunnelRunner {
         if (result.exitCode == 0) return h;
       } catch (_) {}
     }
-    return 'cloudflared';
+    throw StateError('cloudflared not found. Install it first.');
   }
 
   Map<String, dynamic> toJson() => {

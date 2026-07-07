@@ -21,6 +21,7 @@ class TunnelInfo {
 
 class CloudflaredService {
   static String _executablePath = 'cloudflared';
+  static String get resolvedPath => _executablePath;
 
   static String _normalizeBase64(String input) {
     return input.padRight((input.length + 3) ~/ 4 * 4, '=');
