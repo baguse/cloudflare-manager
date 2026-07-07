@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -81,37 +82,84 @@ Color _panelBg(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF0F172A) : const Color(0xFFF5F5F5);
 
-const _encryptMagic = 'CFENCv1';
+const _encryptMagic = 'CFENCv2';
+const _kdfIterations = 100000;
+const _saltLen = 16;
+const _ivLen = 16;
+const _tagLen = 32;
+const _keyLen = 32;
 
-Uint8List _deriveKey(String password) {
-  return Uint8List.fromList(sha256.convert(utf8.encode(password)).bytes);
+Uint8List _deriveKey(String password, Uint8List salt) {
+  final pw = utf8.encode(password);
+  var key = Hmac(sha256, pw).convert(salt).bytes;
+  for (int i = 1; i < _kdfIterations; i++) {
+    key = Hmac(sha256, pw).convert(key).bytes;
+  }
+  return Uint8List.fromList(key);
+}
+
+Uint8List _hmacCtr(Uint8List key, Uint8List iv, int length) {
+  final stream = Uint8List(length);
+  var counter = Uint8List(16);
+  counter.setAll(0, iv);
+  for (int i = 0; i < length; i += 32) {
+    final keystream = Hmac(sha256, key).convert(counter).bytes;
+    final n = (length - i).clamp(0, 32);
+    for (int j = 0; j < n; j++) {
+      stream[i + j] = keystream[j];
+    }
+    // Increment counter (big-endian)
+    for (int k = 15; k >= 0; k--) {
+      counter[k]++;
+      if (counter[k] != 0) break;
+    }
+  }
+  return stream;
 }
 
 String _encrypt(String plain, String password) {
-  final key = _deriveKey(password);
-  final bytes = utf8.encode(plain);
-  final enc = Uint8List(bytes.length);
-  for (int i = 0; i < bytes.length; i++) {
-    enc[i] = bytes[i] ^ key[i % key.length];
+  final salt = Uint8List(_saltLen);
+  for (int i = 0; i < _saltLen; i++) salt[i] = Random.secure().nextInt(256);
+  final iv = Uint8List(_ivLen);
+  for (int i = 0; i < _ivLen; i++) iv[i] = Random.secure().nextInt(256);
+  final key = _deriveKey(password, salt);
+  final plainBytes = utf8.encode(plain);
+  final keystream = _hmacCtr(key, iv, plainBytes.length);
+  final cipher = Uint8List(plainBytes.length);
+  for (int i = 0; i < plainBytes.length; i++) {
+    cipher[i] = plainBytes[i] ^ keystream[i];
   }
-  return _encryptMagic + base64Encode(enc);
+  final tag = Hmac(sha256, key).convert(Uint8List.fromList([...salt, ...iv, ...cipher])).bytes;
+  return _encryptMagic + base64Encode(Uint8List.fromList([...salt, ...iv, ...cipher, ...tag]));
 }
 
 String? _decrypt(String data, String password) {
-  if (!data.startsWith(_encryptMagic)) return data; // not encrypted
+  if (!data.startsWith(_encryptMagic)) return data;
   final encoded = data.substring(_encryptMagic.length);
-  final enc = base64Decode(encoded);
-  final key = _deriveKey(password);
-  final dec = Uint8List(enc.length);
-  for (int i = 0; i < enc.length; i++) {
-    dec[i] = enc[i] ^ key[i % key.length];
+  final bytes = base64Decode(encoded);
+  if (bytes.length < _saltLen + _ivLen + _tagLen) return null;
+  final salt = bytes.sublist(0, _saltLen);
+  final iv = bytes.sublist(_saltLen, _saltLen + _ivLen);
+  final cipher = bytes.sublist(_saltLen + _ivLen, bytes.length - _tagLen);
+  final tag = bytes.sublist(bytes.length - _tagLen);
+  final key = _deriveKey(password, salt);
+  final expectedTag = Hmac(sha256, key).convert(Uint8List.fromList([...salt, ...iv, ...cipher])).bytes;
+  var matches = 0;
+  for (int i = 0; i < _tagLen && i < expectedTag.length; i++) {
+    matches |= tag[i] ^ expectedTag[i];
+  }
+  if (matches != 0) return null; // wrong password
+  final keystream = _hmacCtr(key, iv, cipher.length);
+  final plain = Uint8List(cipher.length);
+  for (int i = 0; i < cipher.length; i++) {
+    plain[i] = cipher[i] ^ keystream[i];
   }
   try {
-    final text = utf8.decode(dec, allowMalformed: true);
-    json.decode(text); // validate JSON
+    final text = utf8.decode(plain, allowMalformed: true);
+    json.decode(text);
     return text;
   } catch (_) {
-    return null; // wrong password or corrupt
+    return null;
   }
 }
 
