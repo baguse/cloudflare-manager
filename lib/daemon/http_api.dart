@@ -541,7 +541,6 @@ class HttpApiServer {
       client.disconnect();
       return;
     }
-    final home = Platform.environment['HOME'] ?? '/tmp';
     final exe = Platform.resolvedExecutable;
     Process.start(exe, ['daemon', 'start'], mode: ProcessStartMode.detached);
     _jsonResponse(response, 200, {'ok': true, 'message': 'Daemon starting...'});
