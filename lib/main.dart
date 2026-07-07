@@ -3044,9 +3044,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
                 try {
                   if (tunnelId != null) {
                     final client = DaemonClient();
-                    await client.connect().timeout(const Duration(seconds: 3)).catchError((_) => false);
-                    await client.unbindTunnel(tunnelId).timeout(const Duration(seconds: 5)).catchError((_) => <String, dynamic>{});
-                    client.disconnect();
+                    final connected = await client.connect().timeout(const Duration(seconds: 3), onTimeout: () => false);
+                    if (connected) {
+                      await client.unbindTunnel(tunnelId).timeout(const Duration(seconds: 5), onTimeout: () => <String, dynamic>{'ok': false});
+                      client.disconnect();
+                    }
                   }
                   await CloudflaredService.forceKillPid(pid);
                   if (tunnelId != null) {
