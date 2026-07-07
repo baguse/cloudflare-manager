@@ -99,9 +99,11 @@ class HttpApiServer {
       return;
     }
 
-    // Serve static files from web/dist (JS, CSS, favicon, etc.)
-    if (method == 'GET' && routePath.isNotEmpty && !routePath.startsWith('/api')) {
+    // Serve static files + SPA fallback (only for non-API paths)
+    if (method == 'GET' && !path.startsWith('/api/') && path != '/api') {
       if (_serveStatic(request.response, routePath)) return;
+      _serveWebDashboard(request.response);
+      return;
     }
 
     // Swagger / OpenAPI docs - no auth required
@@ -144,9 +146,6 @@ class HttpApiServer {
           break;
         case 'GET /tunnels':
           await _handleListTunnels(request.response);
-          break;
-        case 'POST /tunnels':
-          await _handleBindTunnel(request);
           break;
         case _ when routePath.startsWith('/tunnels/') && method == 'DELETE':
           await _handleUnbindTunnel(segments[1], request.response);
@@ -284,20 +283,8 @@ class HttpApiServer {
   Future<void> _handleListAllTunnels(HttpResponse response) async {
     final daemonResult = await _ipc('tunnel_list');
     final daemonTunnels = (daemonResult['tunnels'] as List?)?.cast<Map<String,dynamic>>() ?? [];
-
+    final cfConfigs = await CloudflareService.fetchAllTunnelConfigs();
     final cfTunnels = await CloudflareService.listTunnels();
-    final cfConfigs = <String, Map<String,String>>{};
-    for (final t in cfTunnels) {
-      final id = t['id'] as String? ?? '';
-      final cfg = await CloudflareService.getTunnelConfig(id);
-      if (cfg != null) {
-        final ingress = cfg['config']?['ingress'] as List?;
-        if (ingress != null && ingress.isNotEmpty) {
-          final first = ingress.first as Map<String,dynamic>;
-          cfConfigs[id] = {'hostname': first['hostname']??'', 'service': first['service']??''};
-        }
-      }
-    }
 
     final all = <Map<String,dynamic>>[];
     final seen = <String>{};
@@ -322,14 +309,7 @@ class HttpApiServer {
       });
     }
 
-    final notesMap = await CloudflaredService.readAllTunnelNotes();
-    for (final t in all) {
-      final n = notesMap[t['tunnelId'] as String? ?? ''];
-      if (n?.notes != null) t['notes'] = n!.notes;
-      if (n?.tags != null) t['tags'] = n!.tags;
-      t['serviceEnabled'] = n?.serviceEnabled == true;
-    }
-
+    await CloudflaredService.mergeTunnelNotes(all);
     _jsonResponse(response, 200, {'ok': true, 'tunnels': all, 'daemonRunning': onIpcCall != null || File(_socketPath).existsSync()});
   }
 
@@ -348,27 +328,6 @@ class HttpApiServer {
       hostname: data?['hostname'] as String?,
       ipc: _ipc,
     );
-    _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
-  }
-
-  Future<void> _handleBindTunnel(HttpRequest request) async {
-    final body = await utf8.decodeStream(request);
-    final data = json.decode(body) as Map<String, dynamic>;
-    final tunnelId = data['tunnelId'] as String?;
-    final token = data['token'] as String?;
-    final hostname = data['hostname'] as String? ?? '';
-    final port = data['port'] as int?;
-    if (tunnelId == null || port == null) {
-      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Missing required fields: tunnelId and port'});
-      return;
-    }
-    await CloudflaredService.registerAppTunnel(tunnelId, port, token: token, hostname: hostname);
-    final result = await _ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': token ?? '', 'hostname': hostname, 'port': port});
-    if (result['ok'] == true) {
-      WebhookService.instance.triggerWebhooks(
-        DaemonEvent(type: DaemonEventType.tunnelStarted, tunnelId: tunnelId, hostname: hostname, port: port),
-      ).catchError((_) {});
-    }
     _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
   }
 
@@ -624,7 +583,7 @@ class HttpApiServer {
     }
     export['tunnels'] = tunnelList;
 
-    final zones = await CfApiClient.getZones();
+    final zones = await CloudflareService.getZones();
     final zoneList = <Map<String, dynamic>>[];
     for (final z in zones) {
       final records = await CloudflareService.listDnsRecords(z['id']);
@@ -672,11 +631,11 @@ class HttpApiServer {
 
   Future<void> _handleDeleteTunnel(String tunnelId, HttpResponse response) async {
     final result = await TunnelOperations.deleteTunnel(tunnelId: tunnelId, ipc: _ipc);
-    _jsonResponse(response, 200, result);
+    _jsonResponse(response, result['ok'] == true ? 200 : 500, result);
   }
 
   Future<void> _handleZones(HttpResponse response) async {
-    final zones = await CfApiClient.getZones();
+    final zones = await CloudflareService.getZones();
     _jsonResponse(response, 200, {'ok': true, 'zones': zones.map((z) => {'id': z['id'], 'name': z['name']}).toList()});
   }
 
@@ -688,13 +647,13 @@ class HttpApiServer {
       _jsonResponse(request.response, 400, {'ok': false, 'error': 'token and accountId required'});
       return;
     }
-    await CfApiClient.setToken(token);
-    await CfApiClient.setAccountId(accountId);
+    await AppStorage.instance.write(key: CloudflareService.tokenKey, value: token);
+    await AppStorage.instance.write(key: CloudflareService.accountIdKey, value: accountId);
     _jsonResponse(request.response, 200, {'ok': true});
   }
 
   Future<void> _handleCfConfigStatus(HttpResponse response) async {
-    final token = await CfApiClient.getToken();
+    final token = await AppStorage.instance.read(key: CloudflareService.tokenKey);
     _jsonResponse(response, 200, {'ok': true, 'configured': token != null && token.isNotEmpty});
   }
 

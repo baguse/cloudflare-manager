@@ -640,20 +640,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       final serviceEnabled = await CloudflaredService.readServiceEnabled(tunnelId);
       if (serviceEnabled) continue;
 
-      final cfg = _tunnelConfigs[tunnelId];
-      final hostname = cfg?['hostname'];
-      if (hostname == null || hostname.isEmpty) {
-        await CloudflaredService.unregisterAppTunnel(tunnelId);
-        await CloudflaredService.deleteCredentialsFile(tunnelId);
-        continue;
-      }
+      final storedHostname = entry.value.hostname;
+      final cfgHostname = _tunnelConfigs[tunnelId]?['hostname'];
+      final hostname = cfgHostname ?? storedHostname;
+      if (hostname == null || hostname.isEmpty) continue;
 
       final existsRemotely = _remoteTunnels.any((t) => t['id'] == tunnelId);
-      if (!existsRemotely) {
-        await CloudflaredService.unregisterAppTunnel(tunnelId);
-        await CloudflaredService.deleteCredentialsFile(tunnelId);
-        continue;
-      }
+      if (!existsRemotely) continue;
 
       final match = runningTunnels.where((t) => t.tunnelId == tunnelId).toList();
       if (match.isEmpty) {

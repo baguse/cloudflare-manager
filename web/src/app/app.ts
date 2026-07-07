@@ -32,23 +32,11 @@ import { ToastService } from './toast.service';
           @for (t of tabs; track t.id) {
             <a class="sidebar-item" routerLink="/{{t.id}}" routerLinkActive="active" [title]="sidebarCollapsed()?t.label:''"><span class="material-icons" style="font-size:18px;width:18px">{{t.icon}}</span>@if (!sidebarCollapsed()) { <span>{{t.label}}</span> }</a>
           }
-          <div class="sidebar-item" (click)="toggleWatcher()" [title]="sidebarCollapsed()?'Watcher':''"><span class="material-icons" style="font-size:18px;width:18px">{{watcherEnabled?'visibility':'visibility_off'}}</span>@if (!sidebarCollapsed()) { Watcher: {{watcherEnabled?'ON':'OFF'}} }</div>
-          <div class="sidebar-item danger" (click)="killDaemons()" [title]="sidebarCollapsed()?'Kill Daemons':''"><span class="material-icons" style="font-size:18px;width:18px">bug_report</span>@if (!sidebarCollapsed()) { Kill Daemons }</div>
-          <div class="sidebar-item daemon-status" [title]="sidebarCollapsed()?'Daemon: '+(daemonRunning()?'Running':'Stopped'):''">
-            <span class="material-icons" style="font-size:18px;width:18px">dns</span>
-            @if (!sidebarCollapsed()) {
-            <span>Daemon: {{daemonRunning()?'Running':'Stopped'}}</span>
-            <button class="btn btn-ghost btn-xs" style="margin-left:auto" (click)="daemonRunning()?stopDaemon():startDaemon()">
-              <span class="material-icons" style="font-size:16px">{{daemonRunning()?'stop':'play_arrow'}}</span>
-            </button>
-            }
-          </div>
           <div class="spacer"></div>
           <button class="theme-btn" (click)="toggleTheme()"><span class="material-icons" style="font-size:16px">{{theme()==='dark'?'dark_mode':'light_mode'}}</span></button>
           <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>@if (!sidebarCollapsed()) { {{connLabel()}} }</div>
         </aside>
         <main class="main" [class.main-expanded]="sidebarCollapsed()">
-          @if (daemonLoading()) { <div class="loading-bar"></div> }
           <router-outlet></router-outlet>
         </main>
 
@@ -91,29 +79,18 @@ export class AppComponent implements OnInit {
   connected = signal(false);
   connDot = () => this.connected()?'dot-green':'dot-red';
   connLabel = () => this.connected()?'Connected':'Disconnected';
-  watcherEnabled = true;
-  daemonRunning = signal(false);
-  daemonLoading = signal(false);
   sidebarCollapsed = signal(window.innerWidth < 900);
 
   constructor(api: ApiService, private router: Router) { this.api = api; }
   ngOnInit() {
     document.documentElement.className = 'dark';
-    if (this.api.configured) { this.connected.set(true); this.checkStatus(); this.router.navigateByUrl('/'); }
+    if (this.api.configured) { this.connected.set(true); this.router.navigateByUrl('/'); this.api.startWs(); }
     window.addEventListener('resize', () => this.sidebarCollapsed.set(window.innerWidth < 900));
   }
 
-  connect() { this.api.connect(this.url, this.key); this.connected.set(true); this.checkStatus(); this.router.navigateByUrl('/'); }
+  connect() { this.api.connect(this.url, this.key); this.connected.set(true); this.router.navigateByUrl('/'); }
 
   toggleTheme() { this.theme.set(this.theme() === 'dark' ? 'light' : 'dark'); localStorage.setItem('cf_theme', this.theme()); document.documentElement.className = this.theme(); }
-
-  async checkStatus() { try { const s = await this.api.call('/api/status','GET'); this.daemonRunning.set(s.running||s.ok||false); } catch {} }
-
-  async startDaemon() { this.daemonLoading.set(true); try { await this.api.call('/api/daemon/start','POST'); this.toast.show('Daemon starting...'); this.daemonRunning.set(true); } catch { this.toast.show('Error',true); } finally { this.daemonLoading.set(false); } }
-  async stopDaemon() { if(!confirm('Stop daemon?')) return; this.daemonLoading.set(true); try { await this.api.call('/api/daemon/stop','POST'); this.toast.show('Daemon stopped'); this.daemonRunning.set(false); } catch { this.toast.show('Error',true); } finally { this.daemonLoading.set(false); } }
-
-  toggleWatcher() { this.watcherEnabled = !this.watcherEnabled; this.toast.show('Watcher '+(this.watcherEnabled?'enabled':'disabled')); }
-  async killDaemons() { if(!confirm('Kill all cloudflared processes?')) return; this.daemonLoading.set(true); try { await this.api.call('/api/daemon/stop','POST'); this.toast.show('Daemon killed'); } catch { this.toast.show('Error',true); } finally { this.daemonLoading.set(false); } }
 
   copyQrUrl() { navigator.clipboard.writeText(this.modals.qrData()); this.toast.show('URL copied!'); }
   openUrl(url:string) { window.open(url,'_blank'); }

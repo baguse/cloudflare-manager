@@ -199,6 +199,24 @@ class CloudflareService {
     return [];
   }
 
+  // Fetch hostname/service from ingress config for all tunnels
+  static Future<Map<String, Map<String, String>>> fetchAllTunnelConfigs() async {
+    final result = <String, Map<String, String>>{};
+    final tunnels = await listTunnels();
+    for (final t in tunnels) {
+      final id = t['id'] as String? ?? '';
+      final cfg = await getTunnelConfig(id);
+      if (cfg != null) {
+        final ingress = cfg['config']?['ingress'] as List?;
+        if (ingress != null && ingress.isNotEmpty) {
+          final first = ingress.first as Map<String, dynamic>;
+          result[id] = {'hostname': first['hostname'] ?? '', 'service': first['service'] ?? ''};
+        }
+      }
+    }
+    return result;
+  }
+
   // Get tunnel configuration (ingress rules)
   static Future<Map<String, dynamic>?> getTunnelConfig(String tunnelId) async {
     try {

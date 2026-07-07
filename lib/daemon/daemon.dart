@@ -289,10 +289,11 @@ class CloudflareDaemon {
               return {'ok': false, 'error': 'tunnel not found'};
             case 'tunnel_unbind':
               final id = args?['tunnelId'] as String?;
-              if (id != null && _runners.containsKey(id)) {
+              if (id == null) return {'ok': false, 'error': 'Missing tunnelId'};
+              if (_runners.containsKey(id)) {
                 await _runners[id]!.stop(); _runners.remove(id); return {'ok': true};
               }
-              return {'ok': false, 'error': 'tunnel not found'};
+              return {'ok': false, 'error': 'Tunnel not found'};
             case 'shutdown':
               await stop();
               return {'ok': true};

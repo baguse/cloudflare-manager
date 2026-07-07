@@ -15,8 +15,10 @@ export class ApiService {
   connect(url: string, key: string) {
     this._url.set(url); this._key.set(key);
     localStorage.setItem('cf_url', url); localStorage.setItem('cf_key', key);
-    this._startWs();
+    this.startWs();
   }
+
+  startWs() { this._startWs(); }
 
   async call(path: string, method = 'GET', data?: any): Promise<any> {
     const url = this._url().replace(/\/$/, '') + path;
@@ -28,15 +30,17 @@ export class ApiService {
   }
 
   private _startWs() {
+    if (!this.configured) return;
     this._ws?.close();
-    const wsUrl = this._url().replace('http://', 'ws://').replace('https://', 'wss://').replace(/\/$/, '');
+    const base = this._url().replace(/^http/, 'ws').replace(/\/$/, '');
     try {
-      this._ws = new WebSocket(wsUrl + '/api/ws?token=' + encodeURIComponent(this.apiKey));
+      this._ws = new WebSocket(base + '/api/ws?token=' + encodeURIComponent(this._key()));
+      this._ws.onopen = () => console.log('[ws] connected');
       this._ws.onmessage = (e) => {
         try { JSON.parse(e.data); this._eventSeq.set(this._eventSeq() + 1); } catch {}
       };
-      this._ws.onclose = () => { setTimeout(() => { if (this.configured) this._startWs(); }, 3000); };
+      this._ws.onclose = () => { setTimeout(() => this._startWs(), 3000); };
       this._ws.onerror = () => this._ws?.close();
-    } catch {}
+    } catch(e) { console.log('[ws] error', e); }
   }
 }

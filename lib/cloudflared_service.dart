@@ -364,6 +364,19 @@ class CloudflaredService {
     return {};
   }
 
+  /// Merge notes/tags/serviceEnabled from app-tunnels.json into a list of tunnel maps, in-place.
+  static Future<void> mergeTunnelNotes(List<Map<String, dynamic>> tunnels) async {
+    final notesMap = await readAllTunnelNotes();
+    final allNotes = notesMap;
+    for (final t in tunnels) {
+      final id = t['tunnelId'] as String? ?? '';
+      final n = allNotes[id];
+      if (n?.notes != null) t['notes'] = n!.notes;
+      if (n?.tags != null) t['tags'] = n!.tags;
+      t['serviceEnabled'] = n?.serviceEnabled == true;
+    }
+  }
+
   static Future<void> saveServiceEnabled(String tunnelId, bool enabled) async {
     final file = _appTunnelMapFile();
     if (file == null) return;
