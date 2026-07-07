@@ -16,6 +16,8 @@ class TunnelRunner {
   final int maxRestarts;
 
   Process? _process;
+  StreamSubscription? _stdoutSub;
+  StreamSubscription? _stderrSub;
   TunnelRunState _state = TunnelRunState.idle;
   final List<String> _logs = [];
   Timer? _healthTimer;
@@ -46,6 +48,8 @@ class TunnelRunner {
     _state = TunnelRunState.starting;
 
     try {
+      _stdoutSub?.cancel();
+      _stderrSub?.cancel();
       final cloudflared = await _findCloudflared();
       if (token != null) {
         await CloudflaredService.writeCredentialsFile(token!);
@@ -64,11 +68,11 @@ class TunnelRunner {
         port: port,
       ));
 
-      _process!.stdout.transform(utf8.decoder).listen((data) {
+      _stdoutSub = _process!.stdout.transform(utf8.decoder).listen((data) {
         _addLog(data);
       });
 
-      _process!.stderr.transform(utf8.decoder).listen((data) {
+      _stderrSub = _process!.stderr.transform(utf8.decoder).listen((data) {
         _addLog(data);
       });
 
@@ -106,6 +110,8 @@ class TunnelRunner {
     _state = TunnelRunState.stopped;
     _healthTimer?.cancel();
     _restartTimer?.cancel();
+    _stdoutSub?.cancel();
+    _stderrSub?.cancel();
     _process?.kill(ProcessSignal.sigterm);
     await _process?.exitCode.timeout(
       const Duration(seconds: 5),
