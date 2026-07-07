@@ -5,6 +5,8 @@ export class ApiService {
   private _url = signal(localStorage.getItem('cf_url') || '');
   private _key = signal(localStorage.getItem('cf_key') || '');
   private _ws: WebSocket | null = null;
+  private _wsRetries = 0;
+  private _wsMaxRetries = 10;
   private _eventSeq = signal(0);
   readonly eventCount = this._eventSeq.asReadonly();
 
@@ -41,11 +43,16 @@ export class ApiService {
     const base = this._url().replace(/^http/, 'ws').replace(/\/$/, '');
     try {
       this._ws = new WebSocket(base + '/api/ws?token=' + encodeURIComponent(this._key()));
-      this._ws.onopen = () => console.log('[ws] connected');
+      this._ws.onopen = () => { console.log('[ws] connected'); this._wsRetries = 0; };
       this._ws.onmessage = (e) => {
         try { JSON.parse(e.data); this._eventSeq.set(this._eventSeq() + 1); } catch {}
       };
-      this._ws.onclose = () => { setTimeout(() => this._startWs(), 3000); };
+      this._ws.onclose = (e) => {
+        if (this._wsRetries >= this._wsMaxRetries) return;
+        this._wsRetries++;
+        const delay = Math.min(1000 * Math.pow(2, this._wsRetries), 30000);
+        setTimeout(() => this._startWs(), delay);
+      };
       this._ws.onerror = () => this._ws?.close();
     } catch(e) { console.log('[ws] error', e); }
   }
