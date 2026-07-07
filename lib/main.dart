@@ -978,6 +978,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         final process = await CloudflaredService.startTunnelById(tunnelId);
         if (process == null) throw Exception('No credentials file found');
         startPid = process.pid;
+        _runningTunnels.add(TunnelInfo(pid: process.pid, tunnelId: tunnelId));
+        _tunnelLocalProcess[tunnelId] = OpenPort(port: port, processName: 'cloudflared');
         _fireWebhook(DaemonEventType.tunnelStarted, tunnelId: tunnelId, hostname: hostname, port: port);
       }
 
