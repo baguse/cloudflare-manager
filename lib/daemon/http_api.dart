@@ -580,7 +580,11 @@ class HttpApiServer {
   Future<void> _handlePatchSettings(HttpRequest request) async {
     final body = json.decode(await utf8.decodeStream(request));
     for (final entry in (body as Map<String, dynamic>).entries) {
-      await AppStorage.instance.write(key: entry.key, value: entry.value?.toString());
+      final newVal = entry.value?.toString();
+      final oldVal = await AppStorage.instance.read(key: entry.key);
+      if (newVal != oldVal) {
+        await AppStorage.instance.write(key: entry.key, value: newVal);
+      }
     }
     _jsonResponse(request.response, 200, {'ok': true});
   }
