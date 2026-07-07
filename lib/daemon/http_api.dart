@@ -392,7 +392,6 @@ class HttpApiServer {
   // ---- Webhooks CRUD ----
 
   Future<void> _handleListWebhooks(HttpResponse response) async {
-    await WebhookService.instance.loadWebhooks();
     _jsonResponse(response, 200, {'ok': true, 'webhooks': WebhookService.instance.webhooks.map((w) => w.toJson()).toList()});
   }
 
@@ -419,7 +418,6 @@ class HttpApiServer {
   }
 
   Future<void> _handleTestWebhook(String id, HttpResponse response) async {
-    await WebhookService.instance.loadWebhooks();
     final w = WebhookService.instance.webhooks.where((w) => w.id == id).firstOrNull;
     if (w == null) {
       _jsonResponse(response, 404, {'ok': false, 'error': 'Webhook not found'});
