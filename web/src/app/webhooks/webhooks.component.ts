@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import { ApiService } from '../api.service';
 import { ToastService } from '../toast.service';
+import { ConfirmService } from '../confirm.service';
 
 interface WebhookConfig { id: string; name: string; type: string; enabled: boolean; triggers: string[]; url?: string; method?: string; headers?: Record<string,string>; bodyTemplate?: string; webhookUrl?: string; channelId?: string; botToken?: string; maxRetries?: number; }
 
@@ -116,6 +117,7 @@ const ALL_TRIGGERS = [
 export class WebhooksComponent implements OnInit {
   private api = inject(ApiService);
   private toast = inject(ToastService);
+  private confirmSvc = inject(ConfirmService);
   loading = signal(false);
   hooks = signal<WebhookConfig[]>([]);
   showForm = false; editId = '';
@@ -184,5 +186,5 @@ export class WebhooksComponent implements OnInit {
   }
 
   async testWebhook(id:string) { this.loading.set(true); try { await this.api.call('/api/webhooks/'+id+'/test','POST'); this.toast.show('Test passed'); } catch { this.toast.show('Test failed',true); } finally { this.loading.set(false); } }
-  async delWebhook(id:string) { if(!confirm('Delete?')) return; this.loading.set(true); try { await this.api.call('/api/webhooks/'+id,'DELETE'); await this.loadWebhooks(); await this.api.call('/api/webhooks/reload','POST').catch(()=>{}); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
+  async delWebhook(id:string) { if(!await this.confirmSvc.confirm('Delete?')) return; this.loading.set(true); try { await this.api.call('/api/webhooks/'+id,'DELETE'); await this.loadWebhooks(); await this.api.call('/api/webhooks/reload','POST').catch(()=>{}); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
 }

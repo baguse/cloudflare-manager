@@ -2,6 +2,7 @@ import { Component, OnInit, signal, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../api.service';
 import { ToastService } from '../toast.service';
+import { ConfirmService } from '../confirm.service';
 
 interface RateAlert { id: string; name: string; domain: string; thresholdPerHour: number; enabled: boolean; }
 
@@ -20,6 +21,7 @@ interface RateAlert { id: string; name: string; domain: string; thresholdPerHour
 export class AlertsComponent implements OnInit {
   private api = inject(ApiService);
   private toast = inject(ToastService);
+  private confirmSvc = inject(ConfirmService);
   loading = signal(false);
   alerts = signal<RateAlert[]>([]);
   showAForm = false; aForm = {name:'',domain:'',thresholdPerHour:10000};
@@ -29,5 +31,5 @@ export class AlertsComponent implements OnInit {
   async loadAlerts() { this.loading.set(true); try { const r = await this.api.call('/api/rate-alerts'); this.alerts.set(r.alerts||[]); } catch {} finally { this.loading.set(false); } }
   async saveAlert() { this.loading.set(true); try { await this.api.call('/api/rate-alerts','POST',this.aForm); this.showAForm=false; this.aForm = {name:'',domain:'',thresholdPerHour:10000}; await this.loadAlerts(); this.toast.show('Created'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
   async checkAlerts() { this.loading.set(true); try { const r = await this.api.call('/api/rate-alerts/check','POST'); this.toast.show(JSON.stringify(r.results)); } catch { this.toast.show('Error',true); } finally { this.loading.set(false); } }
-  async delAlert(id:string) { if(!confirm('Delete?')) return; this.loading.set(true); try { await this.api.call('/api/rate-alerts/'+id,'DELETE'); await this.loadAlerts(); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
+  async delAlert(id:string) { if(!await this.confirmSvc.confirm('Delete?')) return; this.loading.set(true); try { await this.api.call('/api/rate-alerts/'+id,'DELETE'); await this.loadAlerts(); this.toast.show('Deleted'); } catch { this.toast.show('Error',true); this.loading.set(false); } }
 }

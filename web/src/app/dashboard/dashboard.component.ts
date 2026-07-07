@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../api.service';
 import { ModalService } from '../modal.service';
 import { ToastService } from '../toast.service';
+import { ConfirmService } from '../confirm.service';
 import * as QRCode from 'qrcode';
 
 interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; service?:string; }
@@ -92,6 +93,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private api = inject(ApiService);
   private toast = inject(ToastService);
   private modals = inject(ModalService);
+  private confirmSvc = inject(ConfirmService);
   private destroyRef = inject(DestroyRef);
   loading = signal(false);
   error = signal('');
@@ -135,8 +137,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.loading.set(true); try { const r = await this.api.call('/api/bind','POST',{subdomain:this.bind.subdomain,zoneId:this.bind.zoneId,zoneName:z.name,port:+this.bind.port}); this.toast.show('Bound: '+r.url); this.showBind=false; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); }
   }
   async quickBindExisting(tunnelId:string) { if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST',{port:this.bindPort||undefined}); this.toast.show('Tunnel bound'); this.bindTunnelId=''; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
-  async unbind(id:string) { if(this.actingTunnelId())return; if(!confirm('Unbind?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id,'DELETE');this.toast.show('Unbound');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
-  async deleteTunnel(id:string) { if(this.actingTunnelId())return; if(!confirm('Delete from Cloudflare?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id+'/delete','POST');this.toast.show('Deleted');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
+  async unbind(id:string) { if(this.actingTunnelId())return; if(!await this.confirmSvc.confirm('Unbind?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id,'DELETE');this.toast.show('Unbound');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
+  async deleteTunnel(id:string) { if(this.actingTunnelId())return; if(!await this.confirmSvc.confirm('Delete from Cloudflare?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id+'/delete','POST');this.toast.show('Deleted');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
   async showLogs(id:string) { this.logsModal.set(true); this.logLines.set([]); this.actingTunnelId.set(id); try{const r=await this.api.call('/api/logs/'+id+'?limit=100');this.logLines.set(r.logs||[]);}catch{this.logLines.set(['Error']);}finally{this.actingTunnelId.set('');}}
   async copyUrl(url:string) { try{await navigator.clipboard.writeText(url);this.toast.show('Copied!');}catch{this.toast.show('Copy failed',true);}}
   async showQr(url:string) { this.modals.kind.set('qr'); this.modals.qrData.set(url); try { this.modals.qrDataUrl.set(await QRCode.toDataURL(url,{width:240,margin:2,color:{dark:'#0F172A',light:'#ffffff'}})); } catch { this.modals.qrDataUrl.set(''); } }

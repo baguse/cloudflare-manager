@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../api.service';
 import { ToastService } from '../toast.service';
+import { ConfirmService } from '../confirm.service';
 
 interface DnsZone { id: string; name: string; }
 interface DnsRecord { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean; }
@@ -60,6 +61,7 @@ interface DnsRecord { id: string; type: string; name: string; content: string; t
 export class DnsComponent implements OnInit {
   private api = inject(ApiService);
   private toast = inject(ToastService);
+  private confirmSvc = inject(ConfirmService);
   loading = signal(false);
   error = signal('');
   zones = signal<DnsZone[]>([]);
@@ -120,7 +122,7 @@ export class DnsComponent implements OnInit {
   editDns(r: any) { this.dnsForm = {type: r.type, name: r.name, content: r.content, ttl: r.ttl, proxied: r.proxied || false, priority: r.priority || 10}; this.editDnsId = r.id; this.showDnsForm = true; }
   dnsTypeBadge(t: string) { return t === 'A' ? 'badge-green' : t === 'AAAA' ? 'badge-green' : t === 'CNAME' ? 'badge-yellow' : t === 'TXT' ? 'badge-gray' : t === 'MX' ? 'badge-red' : 'badge-gray'; }
   async deleteDns(r: DnsRecord) {
-    if (!confirm('Delete?')) return;
+    if (!await this.confirmSvc.confirm('Delete?')) return;
     const z = this.zones().find(x => x.name === this.dnsZone);
     if (!z) return;
     this.loading.set(true);

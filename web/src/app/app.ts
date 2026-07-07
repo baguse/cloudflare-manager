@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
 import { ModalService } from './modal.service';
 import { ToastService } from './toast.service';
+import { ConfirmService } from './confirm.service';
 
 @Component({
   selector: 'app-root',
@@ -41,6 +42,17 @@ import { ToastService } from './toast.service';
           <router-outlet></router-outlet>
         </main>
 
+        @if (confirm.show()) {
+          <div class="modal-overlay" (click)="confirm.cancel()"><div class="modal" (click)="$event.stopPropagation()" style="width:360px;text-align:center">
+            <div class="modal-head"><span class="material-icons" style="font-size:20px;color:var(--accent)">help_outline</span><b>Confirm</b><button class="btn btn-ghost btn-sm" (click)="confirm.cancel()"><span class="material-icons" style="font-size:18px">close</span></button></div>
+            <p style="margin:16px 0;font-size:14px">{{confirm.message()}}</p>
+            <div class="bind-row" style="justify-content:flex-end">
+              <button class="btn btn-ghost btn-sm" (click)="confirm.cancel()">Cancel</button>
+              <button class="btn btn-primary btn-sm" (click)="confirm.ok()">OK</button>
+            </div>
+          </div></div>
+        }
+
         @if (modals.kind()==='qr') {
           <div class="modal-overlay" (click)="modals.kind.set(null)"><div class="modal" (click)="$event.stopPropagation()" style="width:360px;text-align:center">
             <div class="modal-head"><span class="material-icons" style="font-size:20px;color:var(--accent)">qr_code_2</span><b>Scan to open</b><button class="btn btn-ghost btn-sm" (click)="modals.kind.set(null)"><span class="material-icons" style="font-size:18px">close</span></button></div>
@@ -66,6 +78,7 @@ export class AppComponent implements OnInit, OnDestroy {
   api: ApiService;
   modals = inject(ModalService);
   toast = inject(ToastService);
+  confirm = inject(ConfirmService);
   url = localStorage.getItem('cf_url') || '';
   key = localStorage.getItem('cf_key') || '';
   theme = signal(localStorage.getItem('cf_theme') || 'dark');
