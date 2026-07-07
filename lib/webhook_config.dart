@@ -88,10 +88,12 @@ class WebhookConfig {
         orElse: () => WebhookType.http,
       ),
       triggers: (json['triggers'] as List?)
-          ?.map((t) => WebhookTrigger.values.firstWhere(
-                (e) => e.name == t,
-                orElse: () => WebhookTrigger.tunnelStarted,
+          ?.whereType<String>()
+          .map((t) => WebhookTrigger.values.cast<WebhookTrigger?>().firstWhere(
+                (e) => e?.name == t,
+                orElse: () => null,
               ))
+          .whereType<WebhookTrigger>()
           .toSet() ?? {},
       maxRetries: json['maxRetries'] as int? ?? 3,
       url: json['url'] as String?,
