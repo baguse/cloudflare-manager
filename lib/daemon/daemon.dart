@@ -248,6 +248,7 @@ class CloudflareDaemon {
                   final n = notesMap[runner.tunnelId];
                   if (n?.notes != null) j['notes'] = n!.notes;
                   if (n?.tags != null) j['tags'] = n!.tags;
+                  j['serviceEnabled'] = n?.serviceEnabled == true;
                   return j;
                 }).toList(),
                 'eventCount': _eventLog.length,
