@@ -156,11 +156,12 @@ class TunnelRunner {
   }
 
   void _startHealthCheck() {
-    _healthTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    _healthTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
       if (_explicitlyStopped) return;
       if (_process != null && _state == TunnelRunState.running) {
         try {
-          Process.runSync('kill', ['-0', '${_process!.pid}']);
+          final result = await Process.run('kill', ['-0', '${_process!.pid}']);
+          if (result.exitCode != 0) throw ProcessException('kill', ['-0', '${_process!.pid}']);
         } catch (_) {
           if (_explicitlyStopped) return;
           _state = TunnelRunState.crashed;
