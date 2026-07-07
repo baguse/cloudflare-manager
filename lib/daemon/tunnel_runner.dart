@@ -24,6 +24,7 @@ class TunnelRunner {
   Timer? _restartTimer;
   int _restartCount = 0;
   bool _explicitlyStopped = false;
+  bool _everConnected = false;
   static const _baseDelay = Duration(seconds: 2);
   DateTime? _startedAt;
 
@@ -60,6 +61,7 @@ class TunnelRunner {
       _state = TunnelRunState.running;
       _startedAt = DateTime.now();
       _restartCount = 0;
+      _everConnected = true;
 
       onEvent(DaemonEvent(
         type: DaemonEventType.tunnelStarted,
@@ -132,11 +134,15 @@ class TunnelRunner {
 
   void _scheduleRestart() {
     if (_explicitlyStopped) return;
-    if (_restartCount >= maxRestarts) {
-      _addLog('Max restarts ($maxRestarts) reached, giving up.');
+    // If tunnel never connected (likely config/DNS error on startup), cap retries.
+    // If it connected at least once (transient network issue), keep retrying indefinitely.
+    if (!_everConnected && _restartCount >= maxRestarts) {
+      _addLog('Max restarts ($maxRestarts) reached, tunnel never connected — giving up.');
       return;
     }
-    final delay = _baseDelay * (1 << _restartCount.clamp(0, 5));
+    // For tunnels that ever connected: cap the delay at 30s but keep retrying forever.
+    final effectiveCount = _everConnected ? _restartCount.clamp(0, 5) : _restartCount.clamp(0, 5);
+    final delay = _baseDelay * (1 << effectiveCount);
     _restartCount++;
     _addLog('Restarting in ${delay.inSeconds}s (attempt $_restartCount/$maxRestarts)...');
     _restartTimer?.cancel();
