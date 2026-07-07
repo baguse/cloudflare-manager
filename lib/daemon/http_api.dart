@@ -484,10 +484,17 @@ class HttpApiServer {
   }
 
   Future<void> _handleDeleteDns(HttpRequest request) async {
-    final zoneId = request.uri.queryParameters['zoneId'];
-    final recordId = request.uri.queryParameters['recordId'];
+    String? zoneId, recordId;
+    // Try body first (same as PUT), fall back to query params
+    try {
+      final body = json.decode(await utf8.decodeStream(request));
+      zoneId = body['zoneId'] as String?;
+      recordId = body['recordId'] as String?;
+    } catch (_) {}
+    zoneId ??= request.uri.queryParameters['zoneId'];
+    recordId ??= request.uri.queryParameters['recordId'];
     if (zoneId == null || recordId == null) {
-      _jsonResponse(request.response, 400, {'ok': false, 'error': '?zoneId=&recordId= required'});
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'zoneId and recordId required'});
       return;
     }
     final ok = await CloudflareService.deleteDnsRecord(zoneId, recordId);

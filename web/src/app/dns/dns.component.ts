@@ -124,6 +124,6 @@ export class DnsComponent implements OnInit {
     const z = this.zones().find(x => x.name === this.dnsZone);
     if (!z) return;
     this.loading.set(true);
-    try { await this.api.call('/api/dns?zoneId=' + z.id + '&recordId=' + r.id, 'DELETE'); this.toast.show('Deleted'); await this.reloadDns(); } catch { this.toast.show('Error', true); this.loading.set(false); }
+    try { await this.api.call('/api/dns', 'DELETE', {zoneId: z.id, recordId: r.id}); this.toast.show('Deleted'); await this.reloadDns(); } catch { this.toast.show('Error', true); this.loading.set(false); }
   }
 }
