@@ -1224,10 +1224,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       _showToast('Failed to delete tunnel from Cloudflare.', isError: true);
     }
     _fetchRemoteTunnels();
-    if (id != null) {
-      _busyTunnelIds.remove(id);
-      setState(() {});
-    }
+    _busyTunnelIds.remove(id);
+    setState(() {});
   }
 
   Future<void> _deleteRemoteTunnel(String tunnelId) async {

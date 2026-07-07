@@ -619,7 +619,7 @@ class HttpApiServer {
   Future<void> _handlePatchSettings(HttpRequest request) async {
     final body = await _parseBody(request);
     if (body == null) return;
-    for (final entry in (body as Map<String, dynamic>).entries) {
+    for (final entry in body.entries) {
       final newVal = entry.value?.toString();
       final oldVal = await AppStorage.instance.read(key: entry.key);
       if (newVal != oldVal) {

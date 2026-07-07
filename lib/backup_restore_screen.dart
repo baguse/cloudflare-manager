@@ -87,7 +87,6 @@ const _kdfIterations = 100000;
 const _saltLen = 16;
 const _ivLen = 16;
 const _tagLen = 32;
-const _keyLen = 32;
 
 Uint8List _deriveKey(String password, Uint8List salt) {
   final pw = utf8.encode(password);
