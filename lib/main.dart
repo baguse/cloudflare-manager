@@ -649,10 +649,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       if (!existsRemotely) continue;
 
       final match = runningTunnels.where((t) => t.tunnelId == tunnelId).toList();
-      if (match.isEmpty) {
-        continue;
-      }
-      final pid = match.first.pid;
+      final pid = match.isNotEmpty ? match.first.pid : null;
       _watcher.watch(
         tunnelId: tunnelId,
         port: port,
