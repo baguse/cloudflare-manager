@@ -676,34 +676,40 @@ class HttpApiServer {
     response.close();
   }
 
-  String get _webDistDir {
+  String? _cachedWebDistDir;
+  String? get _webDistDir {
+    if (_cachedWebDistDir != null) return _cachedWebDistDir;
     final home = Platform.environment['HOME'] ?? '/tmp';
     final exe = Platform.resolvedExecutable;
     final exeDir = exe.contains('/') ? exe.substring(0, exe.lastIndexOf('/')) : '';
 
     final candidates = <String>[
-      '$home/.cloudflared/web/dist/browser',
-      '$home/.cloudflared/web/dist',
-      '${Directory.current.path}/web/dist/browser',
-      '${Directory.current.path}/web/dist',
       '$exeDir/web/dist/browser',
-      '$exeDir/web/dist',
       '$exeDir/../web/dist/browser',
+      '$home/.cloudflared/web/dist/browser',
+      '${Directory.current.path}/web/dist/browser',
+      '$exeDir/web/dist',
       '$exeDir/../web/dist',
+      '$home/.cloudflared/web/dist',
+      '${Directory.current.path}/web/dist',
     ];
 
     print('[api] Web dist candidates:');
     for (final dir in candidates) {
       final hasIndex = File('$dir/index.html').existsSync();
       print('[api]   $dir ${hasIndex ? "✓ index.html" : "✗ no index.html"}');
-      if (hasIndex) return dir;
+      if (hasIndex) {
+        _cachedWebDistDir = dir;
+        return dir;
+      }
     }
     print('[api] No web dist found, current dir: ${Directory.current.path}');
-    return candidates.first;
+    return null;
   }
 
   bool _serveStatic(HttpResponse response, String path) {
     final webDir = _webDistDir;
+    if (webDir == null) return false;
 
     final file = File('$webDir$path');
     if (!file.existsSync()) return false;
@@ -733,6 +739,12 @@ class HttpApiServer {
 
   void _serveWebDashboard(HttpResponse response) {
     final webDir = _webDistDir;
+    if (webDir == null) {
+      response.statusCode = 404;
+      response.write('Web dashboard not built. Run: cd web && npm install && npm run build');
+      response.close();
+      return;
+    }
 
     final file = File('$webDir/index.html');
     if (!file.existsSync()) {
