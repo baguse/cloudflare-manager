@@ -735,6 +735,9 @@ class HttpApiServer {
 
     _corsHeaders(response);
     response.headers.contentType = contentType;
+    response.headers.set('Cache-Control', path.endsWith('.html')
+        ? 'no-cache, no-store, must-revalidate'
+        : 'public, max-age=31536000, immutable');
     response.statusCode = 200;
     final isText = path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.html') || path.endsWith('.svg');
     if (isText) {
@@ -765,6 +768,7 @@ class HttpApiServer {
 
     final html = await file.readAsString();
     response.headers.contentType = ContentType.html;
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     response.statusCode = 200;
     response.write(html);
     response.close();
