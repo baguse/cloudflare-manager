@@ -184,13 +184,9 @@ class WebhookService {
 
     _debugLog('Event ${event.eventName} → triggering ${matchingWebhooks.length} webhook(s): ${matchingWebhooks.map((w) => w.name).join(", ")}');
 
-    await Future.wait(matchingWebhooks.map((webhook) async {
-      try {
-        await _executeWebhook(webhook, event, trigger);
-      } catch (e) {
-        _debugLog('Failed to execute webhook ${webhook.name}: $e');
-      }
-    }));
+    await Future.wait(matchingWebhooks.map((webhook) =>
+      _executeWebhook(webhook, event, trigger),
+    ));
   }
 
   WebhookTrigger? _mapEventToTrigger(DaemonEventType eventType) {
