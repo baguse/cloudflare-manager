@@ -38,6 +38,8 @@ class HttpApiServer {
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
     print('[api] HTTP API listening on http://0.0.0.0:$port');
     print('[api] Auth key prefix: $_prefix...');
+    await WebhookService.instance.loadWebhooks();
+    await RateAlertService.instance.loadAlerts();
 
     await for (final request in _server!) {
       _handleRequest(request);
@@ -398,7 +400,6 @@ class HttpApiServer {
   Future<void> _handleCreateWebhook(HttpRequest request) async {
     final body = json.decode(await utf8.decodeStream(request));
     final cfg = WebhookConfig.fromJson(body);
-    await WebhookService.instance.loadWebhooks();
     await WebhookService.instance.addWebhook(cfg);
     _jsonResponse(request.response, 201, {'ok': true, 'id': cfg.id});
   }
@@ -406,13 +407,11 @@ class HttpApiServer {
   Future<void> _handleUpdateWebhook(String id, HttpRequest request) async {
     final body = json.decode(await utf8.decodeStream(request));
     final cfg = WebhookConfig.fromJson({...body, 'id': id});
-    await WebhookService.instance.loadWebhooks();
     await WebhookService.instance.updateWebhook(cfg);
     _jsonResponse(request.response, 200, {'ok': true});
   }
 
   Future<void> _handleDeleteWebhook(String id, HttpResponse response) async {
-    await WebhookService.instance.loadWebhooks();
     await WebhookService.instance.deleteWebhook(id);
     _jsonResponse(response, 200, {'ok': true});
   }
