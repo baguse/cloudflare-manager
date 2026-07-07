@@ -1044,24 +1044,27 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
     if (!await _confirmDelete()) { _busyTunnelIds.remove(id); setState(() {}); return; }
     _showToast('Deleting tunnel...', isInfo: true);
 
-    // Local process cleanup (UI-specific)
-    if (tunnel != null) {
-      tunnel.process?.kill();
-      if (tunnel.tunnelId != null) {
-        _tunnelLocalProcess.remove(tunnel.tunnelId!);
-        _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
-      }
-      setState(() => _activeTunnels.remove(tunnel));
-    } else if (pid != null) {
-      try {
-        await CloudflaredService.forceKillPid(pid);
-        _runningTunnels.removeWhere((t) => t.pid == pid);
-      } catch (_) {}
-    }
-    _watcher.unwatch(id);
-
     final result = await TunnelOperations.deleteTunnel(tunnelId: id, ipc: _ipcDaemon);
-    _showToast(result['ok'] == true ? 'Tunnel and DNS record deleted.' : 'Local tunnel stopped, but Cloudflare delete failed.', isError: result['ok'] != true);
+    if (result['ok'] == true) {
+      // Only clean up local state if remote delete succeeded
+      if (tunnel != null) {
+        tunnel.process?.kill();
+        if (tunnel.tunnelId != null) {
+          _tunnelLocalProcess.remove(tunnel.tunnelId!);
+          _runningTunnels.removeWhere((t) => t.tunnelId == tunnel.tunnelId);
+        }
+        setState(() => _activeTunnels.remove(tunnel));
+      } else if (pid != null) {
+        try {
+          await CloudflaredService.forceKillPid(pid);
+          _runningTunnels.removeWhere((t) => t.pid == pid);
+        } catch (_) {}
+      }
+      _watcher.unwatch(id);
+      _showToast('Tunnel and DNS record deleted.');
+    } else {
+      _showToast('Failed to delete tunnel from Cloudflare.', isError: true);
+    }
     _fetchRemoteTunnels();
     if (id != null) {
       _busyTunnelIds.remove(id);
