@@ -111,7 +111,7 @@ class HttpApiServer {
 
     // Serve static files + SPA fallback (only for non-API paths)
     if (method == 'GET' && !path.startsWith('/api/') && path != '/api') {
-      if (_serveStatic(request.response, routePath)) return;
+      if (await _serveStatic(request.response, routePath)) return;
       _serveWebDashboard(request.response);
       return;
     }
@@ -707,12 +707,12 @@ class HttpApiServer {
     return null;
   }
 
-  bool _serveStatic(HttpResponse response, String path) {
+  Future<bool> _serveStatic(HttpResponse response, String path) async {
     final webDir = _webDistDir;
     if (webDir == null) return false;
 
     final file = File('$webDir$path');
-    if (!file.existsSync()) return false;
+    if (!await file.exists()) return false;
 
     final contentType = path.endsWith('.css')
         ? ContentType('text', 'css', charset: 'utf-8')
@@ -729,15 +729,15 @@ class HttpApiServer {
     response.statusCode = 200;
     final isText = path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.html') || path.endsWith('.svg');
     if (isText) {
-      response.write(file.readAsStringSync());
+      response.write(await file.readAsString());
     } else {
-      response.add(file.readAsBytesSync());
+      response.add(await file.readAsBytes());
     }
     response.close();
     return true;
   }
 
-  void _serveWebDashboard(HttpResponse response) {
+  Future<void> _serveWebDashboard(HttpResponse response) async {
     final webDir = _webDistDir;
     if (webDir == null) {
       response.statusCode = 404;
