@@ -183,7 +183,9 @@ class CloudflaredService {
 
   static Future<Map<int, int>> resolveLocalPorts(List<TunnelInfo> tunnels) async {
     final Map<int, int> resolved = {};
-    final appMap = await readAppTunnelPortMap();
+    final appMapFull = await readAppTunnelPortMapFull();
+    final appMap = <String, int>{};
+    appMapFull.forEach((k, v) { appMap[k] = v.port; });
     for (final t in tunnels) {
       if (t.localPort != null) {
         resolved[t.pid] = t.localPort!;
@@ -205,29 +207,6 @@ class CloudflaredService {
     final home = Platform.environment['HOME'];
     if (home == null) return null;
     return File('$home/.cloudflared/app-tunnels.json');
-  }
-
-  static Future<Map<String, int>> readAppTunnelPortMap() async {
-    final file = _appTunnelMapFile();
-    if (file == null) return {};
-    try {
-      if (!await file.exists()) return {};
-      final content = await file.readAsString();
-      final data = json.decode(content);
-      if (data is Map) {
-        final out = <String, int>{};
-        data.forEach((k, v) {
-          if (v is num) {
-            out[k.toString()] = v.toInt();
-          } else if (v is Map && v['port'] is num) {
-            out[k.toString()] = (v['port'] as num).toInt();
-          }
-        });
-        return out;
-      }
-    } catch (e) {
-    }
-    return {};
   }
 
   static Future<String?> readAppTunnelToken(String tunnelId) async {
