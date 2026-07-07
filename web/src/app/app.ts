@@ -1,4 +1,4 @@
-import { Component, signal, OnInit, inject } from '@angular/core';
+import { Component, signal, OnInit, OnDestroy, inject } from '@angular/core';
 import { RouterModule, RouterOutlet, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -62,7 +62,7 @@ import { ToastService } from './toast.service';
     </div>
   `,
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
   api: ApiService;
   modals = inject(ModalService);
   toast = inject(ToastService);
@@ -81,13 +81,16 @@ export class AppComponent implements OnInit {
   connDot = () => this.connected()?'dot-green':'dot-red';
   connLabel = () => this.connected()?'Connected':'Disconnected';
   sidebarCollapsed = signal(window.innerWidth < 900);
+  private _onResize = () => this.sidebarCollapsed.set(window.innerWidth < 900);
 
   constructor(api: ApiService, private router: Router) { this.api = api; }
   ngOnInit() {
     document.documentElement.className = this.theme();
     if (this.api.configured) { this.connected.set(true); this.router.navigateByUrl('/'); this.api.startWs(); }
-    window.addEventListener('resize', () => this.sidebarCollapsed.set(window.innerWidth < 900));
+    window.addEventListener('resize', this._onResize);
   }
+
+  ngOnDestroy() { window.removeEventListener('resize', this._onResize); }
 
   connect() { this.api.connect(this.url, this.key); this.connected.set(true); this.router.navigateByUrl('/'); }
 
