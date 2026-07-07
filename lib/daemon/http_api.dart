@@ -20,7 +20,9 @@ class HttpApiServer {
   final int port;
   final String _hash;
   final String _prefix;
+  final String _apiKey;
   HttpServer? _server;
+  bool setupMode = false;
   Future<Map<String, dynamic>> Function()? onGetStatusDirect;
   Future<Map<String, dynamic>> Function(String cmd, Map<String, dynamic>? args)? onIpcCall;
   void Function(DaemonEvent event)? onDaemonEvent;
@@ -31,7 +33,8 @@ class HttpApiServer {
   }
 
   HttpApiServer({this.port = 9845, required String apiKey, this.onGetStatusDirect, this.onIpcCall, this.onDaemonEvent})
-    : _hash = hashKey(apiKey),
+    : _apiKey = apiKey,
+      _hash = hashKey(apiKey),
       _prefix = apiKey.substring(0, 4);
 
   Future<void> start() async {
@@ -137,6 +140,29 @@ class HttpApiServer {
     // WebSocket for real-time daemon events
     if (method == 'GET' && routePath == '/ws') {
       await _handleWebSocket(request);
+      return;
+    }
+
+    // Setup mode: allow configuring from scratch (no auth required)
+    if (setupMode) {
+      if (method == 'GET' && (routePath == '/' || routePath == '/index.html')) {
+        _serveSetupPage(request.response);
+        return;
+      }
+      if (method == 'POST' && routePath == '/setup') {
+        await _handleSetup(request);
+        return;
+      }
+      // Serve static assets for setup page
+      if (method == 'GET' && !path.startsWith('/api/') && path != '/api') {
+        if (await _serveStatic(request.response, routePath)) return;
+        _serveSetupPage(request.response);
+        return;
+      }
+      // Allow /api/health and /api/status in setup mode
+      if (method == 'GET' && routePath == '/health') { _handleHealth(request.response); return; }
+      if (method == 'GET' && routePath == '/status') { await _handleStatus(request.response); return; }
+      _jsonResponse(request.response, 404, {'error': 'Available only in normal mode'});
       return;
     }
 
@@ -796,6 +822,92 @@ class HttpApiServer {
     response.headers.set('Access-Control-Allow-Origin', '*');
     response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     response.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  }
+
+  void _serveSetupPage(HttpResponse response) {
+    final html = '''
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Cloudflare Manager — Setup</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#F6821F}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px;width:100%;max-width:480px}
+h1{font-size:20px;margin-bottom:8px} .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+label{font-size:12px;color:var(--muted);display:block;margin:12px 0 4px}
+input,select{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px}
+input:focus{border-color:var(--accent);outline:none}
+.btn{width:100%;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;color:#fff;background:var(--accent);margin-top:20px}
+.btn:hover{opacity:.9}
+.success{color:#4ade80;font-size:12px;margin-top:8px;display:none}
+.error{color:#f87171;font-size:12px;margin-top:8px;display:none}
+.mono{font-family:monospace;font-size:11px;color:var(--muted);word-break:break-all;background:var(--bg);padding:8px;border-radius:6px;margin-top:4px}
+</style></head><body>
+<div class="card">
+<h1>⚡ Cloudflare Manager</h1>
+<p class="sub">First-run setup — your API key has been auto-generated. Configure your Cloudflare credentials to get started.</p>
+<label>API Key (auto-generated — copy this now)</label>
+<div class="mono" id="apiKey">$_apiKey</div>
+<label>API Port</label>
+<input id="port" value="$port" placeholder="9845">
+<label>Cloudflare API Token</label>
+<input id="token" placeholder="e.g. AbCdEf123...">
+<label>Cloudflare Account ID</label>
+<input id="accountId" placeholder="e.g. 1a2b3c4d...">
+<button class="btn" onclick="submit()">Save &amp; Start</button>
+<div class="success" id="ok">Saved! Redirecting to login…</div>
+<div class="error" id="err"></div>
+</div>
+<script>
+async function submit(){
+ document.getElementById('err').style.display='none';
+ document.getElementById('ok').style.display='none';
+ const btn=document.querySelector('.btn');
+ btn.disabled=true;btn.textContent='Saving…';
+ try{
+  const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({port:document.getElementById('port').value,token:document.getElementById('token').value,accountId:document.getElementById('accountId').value})});
+  const d=await r.json();
+  if(!d.ok) throw new Error(d.error||'Unknown error');
+  document.getElementById('ok').style.display='block';
+  setTimeout(()=>location.reload(),2000);
+ }catch(e){
+  document.getElementById('err').textContent=e.message;document.getElementById('err').style.display='block';
+  btn.disabled=false;btn.textContent='Save & Start';
+ }
+}
+</script></body></html>''';
+    _html(response, html);
+  }
+
+  Future<void> _handleSetup(HttpRequest request) async {
+    final body = await _parseBody(request);
+    if (body == null) return;
+    final portStr = body!['port'] as String?;
+    final token = body['token'] as String?;
+    final accountId = body['accountId'] as String?;
+    if (token == null || token.isEmpty || accountId == null || accountId.isEmpty) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'token and accountId required'});
+      return;
+    }
+    if (portStr != null) {
+      await AppStorage.instance.write(key: 'api_port', value: portStr);
+    }
+    await AppStorage.instance.write(key: CloudflareService.tokenKey, value: token);
+    await AppStorage.instance.write(key: CloudflareService.accountIdKey, value: accountId);
+    await AppStorage.instance.write(key: 'api_enabled', value: 'true');
+    _jsonResponse(request.response, 200, {'ok': true});
+    // Restart API server in normal mode after a short delay
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      try {
+        final client = DaemonClient();
+        if (await client.connect()) {
+          await client.send('api_restart');
+          client.disconnect();
+        }
+      } catch (_) {}
+    });
   }
 
   void _serveSwaggerUi(HttpResponse response) {

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'events.dart';
 import 'tunnel_runner.dart';
 import '../webhook_service.dart';
 import '../cloudflared_service.dart';
+import '../cloudflare_service.dart';
 import 'http_api.dart';
 import '../app_storage.dart';
 
@@ -216,7 +218,12 @@ class CloudflareDaemon {
     if (await keyFile.exists()) {
       apiKey = (await keyFile.readAsString()).trim();
     }
-    if (apiKey == null || apiKey.isEmpty) return;
+    if (apiKey == null || apiKey.isEmpty) {
+      // First run: generate key, start in setup mode
+      apiKey = 'cm_${_randomString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+      await keyFile.parent.create(recursive: true);
+      await keyFile.writeAsString(apiKey);
+    }
     final portStr = await AppStorage.instance.read(key: 'api_port');
     final port = int.tryParse(portStr ?? '9845') ?? 9845;
     try {
@@ -306,6 +313,11 @@ class CloudflareDaemon {
           }
         },
       );
+      final token = await AppStorage.instance.read(key: CloudflareService.tokenKey);
+      if (token == null || token.isEmpty) {
+        _apiServer!.setupMode = true;
+        _log('[daemon] API in setup mode — visit http://0.0.0.0:$port to configure');
+      }
       await _apiServer!.start();
       _log('[daemon] HTTP API started on port $port');
     } catch (e) {
@@ -485,5 +497,10 @@ class CloudflareDaemon {
     } catch (_) {
       _log('[daemon] Webhook flush timed out');
     }
+  }
+
+  static String _randomString(int length) {
+    final r = Random();
+    return String.fromCharCodes(List.generate(length, (_) => r.nextInt(26) + 97));
   }
 }
