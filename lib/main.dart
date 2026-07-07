@@ -685,14 +685,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
   }
 
   void _fireWebhook(DaemonEventType type, {String? tunnelId, String? hostname, int? port}) {
-    WebhookService.instance.loadWebhooks().then((_) {
-      WebhookService.instance.triggerWebhooks(DaemonEvent(
-        type: type,
-        tunnelId: tunnelId,
-        hostname: hostname,
-        port: port,
-      ));
-    }).catchError((e) {
+    WebhookService.instance.triggerWebhooks(DaemonEvent(
+      type: type,
+      tunnelId: tunnelId,
+      hostname: hostname,
+      port: port,
+    )).catchError((e) {
       _showToast('Webhook error: $e', isError: true);
     });
   }
