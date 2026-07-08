@@ -245,6 +245,9 @@ class HttpApiServer {
         case _ when routePath.startsWith('/rate-alerts/') && method == 'DELETE':
           await _handleDeleteRateAlert(segments[1], request.response);
           break;
+        case _ when routePath.startsWith('/rate-alerts/') && method == 'PUT':
+          await _handleUpdateRateAlert(segments[1], request);
+          break;
         case 'POST /rate-alerts/check':
           await _handleCheckRateAlerts(request.response);
           break;
@@ -566,9 +569,16 @@ class HttpApiServer {
   }
 
   Future<void> _handleDeleteRateAlert(String id, HttpResponse response) async {
-    await RateAlertService.instance.loadAlerts();
     await RateAlertService.instance.deleteAlert(id);
     _jsonResponse(response, 200, {'ok': true});
+  }
+
+  Future<void> _handleUpdateRateAlert(String id, HttpRequest request) async {
+    final body = await _parseBody(request);
+    if (body == null) return;
+    final alert = RateAlertConfig.fromJson({...body, 'id': id});
+    await RateAlertService.instance.updateAlert(alert);
+    _jsonResponse(request.response, 200, {'ok': true});
   }
 
   Future<void> _handleCheckRateAlerts(HttpResponse response) async {
