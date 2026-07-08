@@ -18,7 +18,7 @@ import { ConfirmService } from './confirm.service';
           <div class="login-icon"><span class="material-icons" style="font-size:48px">cloud</span></div>
           <h2>Cloudflare Manager</h2>
           <p class="login-sub">Enter your API key to connect</p>
-          <input class="input" [(ngModel)]="key" placeholder="API Key">
+          <input class="input" [(ngModel)]="key" placeholder="API Key" (keyup.enter)="connect()">
           <button class="btn btn-primary full" (click)="connect()">Connect</button>
         </div>
       } @else {
@@ -78,7 +78,7 @@ export class AppComponent implements OnInit, OnDestroy {
   modals = inject(ModalService);
   toast = inject(ToastService);
   confirm = inject(ConfirmService);
-  url = window.location.origin;
+  url = localStorage.getItem('cf_url') || window.location.origin;
   key = localStorage.getItem('cf_key') || '';
   theme = signal(localStorage.getItem('cf_theme') || 'dark');
   tabs = [
@@ -104,7 +104,16 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnDestroy() { window.removeEventListener('resize', this._onResize); }
 
-  connect() { this.api.connect(this.url, this.key); this.connected.set(true); this.router.navigateByUrl('/'); }
+  async connect() {
+    try {
+      await this.api.callWithKey(this.key, '/api/status', 'GET');
+      this.api.connect(this.url, this.key);
+      this.connected.set(true);
+      this.router.navigateByUrl('/');
+    } catch {
+      this.toast.show('Invalid API key or connection failed', true);
+    }
+  }
 
   logout() {
     this.api.disconnect();
