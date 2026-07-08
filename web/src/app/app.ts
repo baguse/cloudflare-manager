@@ -17,8 +17,7 @@ import { ConfirmService } from './confirm.service';
         <div class="login-card">
           <div class="login-icon"><span class="material-icons" style="font-size:48px">cloud</span></div>
           <h2>Cloudflare Manager</h2>
-          <p class="login-sub">Connect to your API server</p>
-          <input class="input" [(ngModel)]="url" placeholder="API URL (e.g. http://localhost:9845)">
+          <p class="login-sub">Enter your API key to connect</p>
           <input class="input" [(ngModel)]="key" placeholder="API Key">
           <button class="btn btn-primary full" (click)="connect()">Connect</button>
         </div>
@@ -79,7 +78,7 @@ export class AppComponent implements OnInit, OnDestroy {
   modals = inject(ModalService);
   toast = inject(ToastService);
   confirm = inject(ConfirmService);
-  url = localStorage.getItem('cf_url') || '';
+  url = window.location.origin;
   key = localStorage.getItem('cf_key') || '';
   theme = signal(localStorage.getItem('cf_theme') || 'dark');
   tabs = [

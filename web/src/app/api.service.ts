@@ -2,7 +2,7 @@ import { Injectable, signal, computed } from '@angular/core';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  private _url = signal(localStorage.getItem('cf_url') || '');
+  private _url = signal(localStorage.getItem('cf_url') || window.location.origin || '');
   private _key = signal(localStorage.getItem('cf_key') || '');
   private _ws: WebSocket | null = null;
   private _wsRetries = 0;
