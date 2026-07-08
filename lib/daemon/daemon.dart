@@ -210,8 +210,6 @@ class CloudflareDaemon {
   }
 
   Future<void> _startApiIfEnabled() async {
-    final enabled = await AppStorage.instance.read(key: 'api_enabled');
-    if (enabled != 'true') return;
     final home = Platform.environment['HOME'] ?? '/tmp';
     final keyFile = File('$home/.cloudflared/api-key');
     String? apiKey;
@@ -314,7 +312,8 @@ class CloudflareDaemon {
         },
       );
       final token = await AppStorage.instance.read(key: CloudflareService.tokenKey);
-      if (token == null || token.isEmpty) {
+      final accountId = await AppStorage.instance.read(key: CloudflareService.accountIdKey);
+      if (token == null || token.isEmpty || accountId == null || accountId.isEmpty) {
         _apiServer!.setupMode = true;
         _log('[daemon] API in setup mode — visit http://0.0.0.0:$port to configure');
       }

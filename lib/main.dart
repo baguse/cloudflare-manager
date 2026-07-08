@@ -39,16 +39,15 @@ void _log(String msg) {
 }
 
 void main(List<String> args) async {
-  WidgetsFlutterBinding.ensureInitialized();
-
   final startHidden = args.contains('--hidden');
 
+  // Headless modes — no Flutter engine needed
   if (args.contains('daemon') && args.contains('start')) {
     await _runDaemonOnly();
     return;
   }
 
-  // --- CLI-only commands (no GUI) ---
+  // CLI-only commands — no GUI
   final cliCommands = ['status', 'stop', 'restart', 'api-key', 'setup', 'install-service', '--version', '-v', 'help', '--help'];
   if (args.isNotEmpty && !args.contains('--hidden') && !args.contains('daemon')) {
     final cmd = args.first;
@@ -59,6 +58,9 @@ void main(List<String> args) async {
     }
     return;
   }
+
+  // GUI mode — needs Flutter engine
+  WidgetsFlutterBinding.ensureInitialized();
 
   await windowManager.ensureInitialized();
 

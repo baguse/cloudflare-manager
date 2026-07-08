@@ -13,7 +13,7 @@ import '../rate_alert_service.dart';
 import '../rate_alert.dart';
 import '../cloudflared_service.dart';
 import '../tunnel_operations.dart';
-import '../backup_restore_screen.dart';
+import '../auto_backup.dart';
 import '../app_storage.dart';
 
 class HttpApiServer {
@@ -108,6 +108,25 @@ class HttpApiServer {
     // Strip /api prefix for routing
     final routePath = path.startsWith('/api/') ? path.substring(4) : path.startsWith('/api') ? '/' : path;
 
+    // Setup mode: only serve setup page (no auth, no dashboard)
+    if (setupMode) {
+      if (method == 'GET' && (routePath == '/' || routePath == '/index.html')) {
+        _serveSetupPage(request.response);
+        return;
+      }
+      if (method == 'POST' && routePath == '/setup') {
+        await _handleSetup(request);
+        return;
+      }
+      if (method == 'GET' && !path.startsWith('/api/') && path != '/api') {
+        if (await _serveStatic(request.response, routePath)) return;
+      }
+      if (method == 'GET' && routePath == '/health') { _handleHealth(request.response); return; }
+      if (method == 'GET' && routePath == '/status') { await _handleStatus(request.response); return; }
+      _jsonResponse(request.response, 404, {'error': 'Available only in normal mode'});
+      return;
+    }
+
     // Serve web dashboard at /
     if (method == 'GET' && (routePath == '/' || routePath == '/index.html')) {
       await _serveWebDashboard(request.response);
@@ -140,29 +159,6 @@ class HttpApiServer {
     // WebSocket for real-time daemon events
     if (method == 'GET' && routePath == '/ws') {
       await _handleWebSocket(request);
-      return;
-    }
-
-    // Setup mode: allow configuring from scratch (no auth required)
-    if (setupMode) {
-      if (method == 'GET' && (routePath == '/' || routePath == '/index.html')) {
-        _serveSetupPage(request.response);
-        return;
-      }
-      if (method == 'POST' && routePath == '/setup') {
-        await _handleSetup(request);
-        return;
-      }
-      // Serve static assets for setup page
-      if (method == 'GET' && !path.startsWith('/api/') && path != '/api') {
-        if (await _serveStatic(request.response, routePath)) return;
-        _serveSetupPage(request.response);
-        return;
-      }
-      // Allow /api/health and /api/status in setup mode
-      if (method == 'GET' && routePath == '/health') { _handleHealth(request.response); return; }
-      if (method == 'GET' && routePath == '/status') { await _handleStatus(request.response); return; }
-      _jsonResponse(request.response, 404, {'error': 'Available only in normal mode'});
       return;
     }
 

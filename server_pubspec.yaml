@@ -1,0 +1,11 @@
+name: cloudflare_manager_server
+description: Cloudflare Tunnel Manager - Server
+publish_to: none
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  http: ^1.6.0
+  crypto: ^3.0.7
+  uuid: ^4.0.0
