@@ -85,10 +85,10 @@ LAUNCH
 chmod +x "$OUTDIR/usr/bin/$NAME"
 
 # systemd service
-mkdir -p "$OUTDIR/usr/lib/systemd/user"
-cat > "$OUTDIR/usr/lib/systemd/user/$NAME.service" << SERVICE
+mkdir -p "$OUTDIR/usr/lib/systemd/system"
+cat > "$OUTDIR/usr/lib/systemd/system/$NAME.service" << SERVICE
 [Unit]
-Description=Cloudflare Tunnel Manager Daemon
+Description=Cloudflare Tunnel Manager
 After=network-online.target
 Wants=network-online.target
 
@@ -102,7 +102,7 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 SERVICE
 
 echo "=== Building package ==="
@@ -124,6 +124,7 @@ Description: Cloudflare Tunnel Manager (Server)
   Headless daemon + web dashboard for managing Cloudflare Zero Trust tunnels.
   Self-contained binary — no GUI dependencies.
   Manage via browser at http://localhost:9845 or CLI commands.
+  After install, run: cloudflare-manager-server install-service
 CONTROL
     DEB_FILE="$PROJECT_DIR/build/${NAME}_${VERSION}_${ARCH}.deb"
     dpkg-deb --build "$OUTDIR" "$DEB_FILE"
@@ -154,14 +155,36 @@ Manage via browser at http://localhost:9845 or CLI commands.
 %install
 mkdir -p %{buildroot}/usr/lib/$NAME
 mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/usr/lib/systemd/system
 cp -r $OUTDIR/usr/lib/$NAME/* %{buildroot}/usr/lib/$NAME/
 cp $OUTDIR/usr/bin/$NAME %{buildroot}/usr/bin/
 chmod +x %{buildroot}/usr/lib/$NAME/$NAME
 chmod +x %{buildroot}/usr/bin/$NAME
 
+# Systemd service
+cat > %{buildroot}/usr/lib/systemd/system/$NAME.service << 'UNIT'
+[Unit]
+Description=Cloudflare Tunnel Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/$NAME/$NAME
+Restart=always
+RestartSec=5
+Environment=HOME=%h
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 %files
 /usr/lib/$NAME
 /usr/bin/$NAME
+/usr/lib/systemd/system/$NAME.service
 
 %changelog
 * $(date "+%a %b %d %Y") Cloudflare Manager Team - $VERSION-1

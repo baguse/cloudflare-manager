@@ -67,10 +67,10 @@ fi
 echo "=== Creating launch script ==="
 cat > "$DEB_ROOT/usr/bin/$NAME" << LAUNCH
 #!/bin/sh
-# cloudflare-manager — CLI + GUI wrapper
-# CLI commands: status, stop, restart, api-key, setup, --version
-# Daemon:       daemon start
-# GUI:          (no args) or --hidden
+# cloudflare-manager — forwards all args to the binary
+# CLI: status, api-key, install-service, --version
+# Daemon: daemon start
+# GUI: (no args) or --hidden
 
 if [ "\$1" = "daemon" ] && [ "\$2" = "start" ]; then
   exec /usr/lib/$NAME/$BINARY daemon start

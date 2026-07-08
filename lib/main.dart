@@ -48,7 +48,7 @@ void main(List<String> args) async {
   }
 
   // CLI-only commands — no GUI
-  final cliCommands = ['status', 'stop', 'restart', 'api-key', 'setup', 'install-service', '--version', '-v', 'help', '--help'];
+  final cliCommands = ['status', 'api-key', 'install-service', '--version', '-v', 'help', '--help'];
   if (args.isNotEmpty && !args.contains('--hidden') && !args.contains('daemon')) {
     final cmd = args.first;
     if (cliCommands.contains(cmd)) {
@@ -107,35 +107,15 @@ Future<void> _handleCli(List<String> args) async {
     case 'status':
       final client = DaemonClient();
       if (await client.connect()) {
-        print('Daemon: running');
         final result = await client.send('status');
         if (result['ok'] == true) {
           final tunnels = result['tunnels'] as List? ?? [];
-          print('Tunnels: ${tunnels.length} (${tunnels.where((t) => t['state'] == 'running').length} running)');
+          print('Daemon: running, ${tunnels.length} tunnel(s)');
         }
         client.disconnect();
       } else {
         print('Daemon: not running');
       }
-      break;
-    case 'stop':
-      final client = DaemonClient();
-      if (await client.connect()) {
-        await client.send('shutdown');
-        client.disconnect();
-        print('Daemon stopped');
-      } else {
-        print('Daemon is not running');
-      }
-      break;
-    case 'restart':
-      final client = DaemonClient();
-      if (await client.connect()) {
-        await client.send('shutdown');
-        client.disconnect();
-        await Future.delayed(const Duration(seconds: 2));
-      }
-      await _runDaemonOnly();
       break;
     case 'api-key':
       final keyFile = File('$home/.cloudflared/api-key');
@@ -144,38 +124,21 @@ Future<void> _handleCli(List<String> args) async {
         await keyFile.parent.create(recursive: true);
         await keyFile.writeAsString(newKey);
         print('API key regenerated: $newKey');
-        print('Restart the daemon for it to take effect: cloudflare-manager restart');
       } else if (await keyFile.exists()) {
         print(await keyFile.readAsString());
       } else {
         print('No API key. Start the daemon first.');
       }
       break;
-    case 'setup':
-      final keyFile = File('$home/.cloudflared/api-key');
-      String? key;
-      if (await keyFile.exists()) {
-        key = (await keyFile.readAsString()).trim();
-      }
-      final portStr = await AppStorage.instance.read(key: 'api_port');
-      final port = int.tryParse(portStr ?? '9845') ?? 9845;
-      if (key != null && key.isNotEmpty) {
-        print('API already configured:');
-        print('  URL:     http://localhost:$port');
-        print('  API key: $key');
-      } else {
-        print('No API key found. Start the daemon to auto-generate one:');
-        print('  \$ cloudflare-manager daemon start');
-      }
-      break;
     case 'install-service':
       {
-        final serviceDir = '${home}/.config/systemd/user';
-        final serviceFile = File('$serviceDir/cloudflare-manager.service');
+        final serviceDir = '$home/.config/systemd/user';
+        await Directory(serviceDir).create(recursive: true);
+        // Generate inline service file since the GUI package may not ship one
         final exe = Platform.resolvedExecutable;
-        final unit = '''
+        await File('$serviceDir/cloudflare-manager.service').writeAsString('''
 [Unit]
-Description=Cloudflare Tunnel Manager Daemon
+Description=Cloudflare Tunnel Manager
 After=network-online.target
 Wants=network-online.target
 
@@ -190,20 +153,11 @@ StandardError=journal
 
 [Install]
 WantedBy=default.target
-''';
-        await serviceFile.parent.create(recursive: true);
-        await serviceFile.writeAsString(unit);
+''');
         await Process.run('systemctl', ['--user', 'daemon-reload']);
         await Process.run('systemctl', ['--user', 'enable', 'cloudflare-manager']);
-        try {
-          final user = Platform.environment['USER'] ?? Platform.environment['LOGNAME'] ?? '';
-          if (user.isNotEmpty) await Process.run('loginctl', ['enable-linger', user]);
-        } catch (_) {}
-        print('Service installed and enabled.');
-        print('');
-        print('To start now:  systemctl --user start cloudflare-manager');
-        print('Status:        systemctl --user status cloudflare-manager');
-        print('Logs:          journalctl --user -u cloudflare-manager -f');
+        await Process.run('systemctl', ['--user', 'start', 'cloudflare-manager']);
+        print('User service enabled and started.');
       }
       break;
     case '--version':
@@ -228,15 +182,12 @@ void _printHelp() {
   print('Usage: cloudflare-manager [command]');
   print('');
   print('Commands:');
-  print('  status         Show daemon status and tunnel count');
-  print('  stop           Stop the daemon');
-  print('  restart        Restart the daemon');
-  print('  api-key        Show the API key');
-  print('  api-key regen  Regenerate the API key');
-  print('  setup          Show setup URL and API key');
-  print('  install-service  Install systemd user service (auto-start on boot)');
-  print('  daemon start   Start headless daemon (systemd)');
-  print('  --version      Show version');
+  print('  status          Show daemon status and tunnel count');
+  print('  api-key         Show the API key');
+  print('  api-key regen   Regenerate the API key');
+  print('  install-service Install user systemd service (auto-start)');
+  print('  daemon start    Start headless daemon');
+  print('  --version       Show version');
   print('');
   print('No args launches the GUI.');
   exit(0);
