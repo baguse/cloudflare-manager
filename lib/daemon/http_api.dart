@@ -249,10 +249,26 @@ class HttpApiServer {
           await _handleCheckRateAlerts(request.response);
           break;
         case 'POST /backup':
-          await _handleCreateBackup(request.response);
+          if (request.headers.contentType?.mimeType == 'application/json') {
+            await _handleCreateBackupWithOptions(request);
+          } else {
+            await _handleCreateBackup(request.response);
+          }
           break;
         case 'GET /backups':
           await _handleListBackups(request.response);
+          break;
+        case 'GET /backup':
+          await _handleFetchBackup(request);
+          break;
+        case 'DELETE /backup':
+          await _handleDeleteBackup(request);
+          break;
+        case 'POST /restore':
+          await _handleRestore(request);
+          break;
+        case 'POST /backup/decrypt':
+          await _handleDecryptBackup(request);
           break;
         case 'POST /daemon/start':
           await _handleDaemonStart(request.response);
@@ -567,9 +583,135 @@ class HttpApiServer {
     _jsonResponse(response, 200, {'ok': true, 'message': 'Auto-backup created'});
   }
 
+  Future<void> _handleCreateBackupWithOptions(HttpRequest request) async {
+    final body = await _parseBody(request);
+    if (body == null) return;
+    final sections = (body!['sections'] as List?)?.cast<String>() ?? [];
+    final password = body['password'] as String?;
+    final includeSecrets = body['includeSecrets'] == true;
+    // Use the same logic as createAutoBackup with selective sections
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final src = Directory('$home/.cloudflared');
+    if (!await src.exists()) {
+      _jsonResponse(request.response, 500, {'ok': false, 'error': 'No config directory'});
+      return;
+    }
+    final backup = <String, dynamic>{'version': 1, 'timestamp': DateTime.now().toIso8601String(), 'auto': false};
+    final keyMap = {'app-settings.json': 'app_settings', 'webhooks.json': 'webhooks', 'app-tunnels.json': 'app_tunnels', 'daemon.json': 'daemon', 'rate-alerts.json': 'rate_alerts'};
+    for (final entry in keyMap.entries) {
+      if (!sections.contains(entry.value)) continue;
+      final f = File('${src.path}/${entry.key}');
+      if (await f.exists()) backup[entry.value] = json.decode(await f.readAsString());
+    }
+    if (includeSecrets && password != null) {
+      final creds = <String, dynamic>{};
+      await for (final f in src.list()) {
+        final name = f.path.split('/').last;
+        if (name.endsWith('.json') && !keyMap.containsKey(name) && name != 'app-settings.json') {
+          creds[name] = json.decode(await File(f.path).readAsString());
+        }
+      }
+      if (creds.isNotEmpty) backup['credentials'] = creds;
+    }
+    String content = const JsonEncoder.withIndent('  ').convert(backup);
+    if (password != null && password.isNotEmpty) {
+      content = encryptData(content, password);
+    }
+    // Also save to auto-backups directory
+    final dstDir = Directory('$home/.cloudflared/backups');
+    if (!await dstDir.exists()) await dstDir.create(recursive: true);
+    final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+    await File('${dstDir.path}/$stamp.json').writeAsString(content);
+    _jsonResponse(request.response, 200, {'ok': true, 'data': password != null ? content : backup, 'message': 'Backup created'});
+  }
+
   Future<void> _handleListBackups(HttpResponse response) async {
     final backups = await listAutoBackups();
     _jsonResponse(response, 200, {'ok': true, 'backups': backups});
+  }
+
+  Future<void> _handleDecryptBackup(HttpRequest request) async {
+    final body = await _parseBody(request);
+    if (body == null) return;
+    final data = body!['data'] as String?;
+    final password = body['password'] as String?;
+    if (data == null || password == null || password.isEmpty) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'data and password required'});
+      return;
+    }
+    final decrypted = decryptData(data, password);
+    if (decrypted == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Wrong password or corrupt data'});
+      return;
+    }
+    try {
+      final parsed = json.decode(decrypted);
+      _jsonResponse(request.response, 200, {'ok': true, 'data': parsed});
+    } catch (_) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Invalid backup data'});
+    }
+  }
+
+  Future<void> _handleDeleteBackup(HttpRequest request) async {
+    final name = request.uri.queryParameters['name'];
+    if (name == null || name.isEmpty || name.contains('/') || name.contains('..')) {
+      _jsonResponse(request.response, 400, {'ok':false,'error':'Invalid backup name'}); return;
+    }
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final file = File('$home/.cloudflared/backups/$name');
+    if (await file.exists()) { await file.delete(); _jsonResponse(request.response, 200, {'ok':true}); }
+    else { _jsonResponse(request.response, 404, {'ok':false,'error':'Not found'}); }
+  }
+
+  Future<void> _handleFetchBackup(HttpRequest request) async {
+    final name = request.uri.queryParameters['name'];
+    if (name == null || name.isEmpty || name.contains('/') || name.contains('..')) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'Invalid backup name'});
+      return;
+    }
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final file = File('$home/.cloudflared/backups/$name');
+    if (!await file.exists()) {
+      _jsonResponse(request.response, 404, {'ok': false, 'error': 'Backup not found'});
+      return;
+    }
+    final content = await file.readAsString();
+    final data = json.decode(content);
+    _jsonResponse(request.response, 200, {'ok': true, 'data': data});
+  }
+
+  Future<void> _handleRestore(HttpRequest request) async {
+    final body = await _parseBody(request);
+    if (body == null) return;
+    final data = body!['data'] as Map<String, dynamic>?;
+    final sections = (body['sections'] as List?)?.cast<String>() ?? [];
+    if (data == null || sections.isEmpty) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'data and sections required'});
+      return;
+    }
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    int restored = 0;
+    final keyMap = {'app-settings.json': 'app_settings', 'webhooks.json': 'webhooks', 'app-tunnels.json': 'app_tunnels', 'daemon.json': 'daemon', 'rate-alerts.json': 'rate_alerts'};
+    final credsDir = Directory('$home/.cloudflared');
+    for (final entry in keyMap.entries) {
+      if (!sections.contains(entry.value)) continue;
+      final content = data[entry.value];
+      if (content == null) continue;
+      final file = File('$home/.cloudflared/${entry.key}');
+      await file.parent.create(recursive: true);
+      await file.writeAsString(json.encode(content));
+      restored++;
+    }
+    if (sections.contains('tunnel_credentials') && data.containsKey('credentials')) {
+      final creds = data['credentials'] as Map<String, dynamic>?;
+      if (creds != null) {
+        for (final entry in creds.entries) {
+          await File('${credsDir.path}/${entry.key}').writeAsString(json.encode(entry.value));
+        }
+        restored++;
+      }
+    }
+    _jsonResponse(request.response, 200, {'ok': true, 'restored': restored});
   }
 
   // ---- Daemon Control ----

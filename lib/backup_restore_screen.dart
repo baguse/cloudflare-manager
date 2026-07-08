@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'webhook_service.dart';
 import 'rate_alert_service.dart';
 import 'cloudflare_service.dart';
+import 'auto_backup.dart';
 
 const _kAutoBackupDir = '.cloudflared/backups';
 const _kMaxAutoBackups = 10;
@@ -81,86 +82,6 @@ Color _cardBg(BuildContext context) =>
 Color _panelBg(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF0F172A) : const Color(0xFFF5F5F5);
-
-const _encryptMagic = 'CFENCv2';
-const _kdfIterations = 100000;
-const _saltLen = 16;
-const _ivLen = 16;
-const _tagLen = 32;
-
-Uint8List _deriveKey(String password, Uint8List salt) {
-  final pw = utf8.encode(password);
-  var key = Hmac(sha256, pw).convert(salt).bytes;
-  for (int i = 1; i < _kdfIterations; i++) {
-    key = Hmac(sha256, pw).convert(key).bytes;
-  }
-  return Uint8List.fromList(key);
-}
-
-Uint8List _hmacCtr(Uint8List key, Uint8List iv, int length) {
-  final stream = Uint8List(length);
-  var counter = Uint8List(16);
-  counter.setAll(0, iv);
-  for (int i = 0; i < length; i += 32) {
-    final keystream = Hmac(sha256, key).convert(counter).bytes;
-    final n = (length - i).clamp(0, 32);
-    for (int j = 0; j < n; j++) {
-      stream[i + j] = keystream[j];
-    }
-    // Increment counter (big-endian)
-    for (int k = 15; k >= 0; k--) {
-      counter[k]++;
-      if (counter[k] != 0) break;
-    }
-  }
-  return stream;
-}
-
-String _encrypt(String plain, String password) {
-  final salt = Uint8List(_saltLen);
-  for (int i = 0; i < _saltLen; i++) salt[i] = Random.secure().nextInt(256);
-  final iv = Uint8List(_ivLen);
-  for (int i = 0; i < _ivLen; i++) iv[i] = Random.secure().nextInt(256);
-  final key = _deriveKey(password, salt);
-  final plainBytes = utf8.encode(plain);
-  final keystream = _hmacCtr(key, iv, plainBytes.length);
-  final cipher = Uint8List(plainBytes.length);
-  for (int i = 0; i < plainBytes.length; i++) {
-    cipher[i] = plainBytes[i] ^ keystream[i];
-  }
-  final tag = Hmac(sha256, key).convert(Uint8List.fromList([...salt, ...iv, ...cipher])).bytes;
-  return _encryptMagic + base64Encode(Uint8List.fromList([...salt, ...iv, ...cipher, ...tag]));
-}
-
-String? _decrypt(String data, String password) {
-  if (!data.startsWith(_encryptMagic)) return data;
-  final encoded = data.substring(_encryptMagic.length);
-  final bytes = base64Decode(encoded);
-  if (bytes.length < _saltLen + _ivLen + _tagLen) return null;
-  final salt = bytes.sublist(0, _saltLen);
-  final iv = bytes.sublist(_saltLen, _saltLen + _ivLen);
-  final cipher = bytes.sublist(_saltLen + _ivLen, bytes.length - _tagLen);
-  final tag = bytes.sublist(bytes.length - _tagLen);
-  final key = _deriveKey(password, salt);
-  final expectedTag = Hmac(sha256, key).convert(Uint8List.fromList([...salt, ...iv, ...cipher])).bytes;
-  var matches = 0;
-  for (int i = 0; i < _tagLen && i < expectedTag.length; i++) {
-    matches |= tag[i] ^ expectedTag[i];
-  }
-  if (matches != 0) return null; // wrong password
-  final keystream = _hmacCtr(key, iv, cipher.length);
-  final plain = Uint8List(cipher.length);
-  for (int i = 0; i < cipher.length; i++) {
-    plain[i] = cipher[i] ^ keystream[i];
-  }
-  try {
-    final text = utf8.decode(plain, allowMalformed: true);
-    json.decode(text);
-    return text;
-  } catch (_) {
-    return null;
-  }
-}
 
 class BackupRestoreScreen extends StatefulWidget {
   const BackupRestoreScreen({super.key});
@@ -237,7 +158,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
 
       var content = const JsonEncoder.withIndent('  ').convert(backup);
       if (_usePassword) {
-        content = _encrypt(content, _passwordController.text.trim());
+        content = encryptData(content, _passwordController.text.trim());
       }
 
       final defaultName = 'cloudflare-manager-backup${_usePassword ? '-encrypted' : ''}-${DateTime.now().toIso8601String().split('T').first}.json';
@@ -278,13 +199,13 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     final rawData = await File(filePath).readAsString();
 
     Map<String, dynamic>? data;
-    if (rawData.startsWith(_encryptMagic)) {
+    if (rawData.startsWith(encMagic)) {
       final pw = await _promptPassword('This backup is encrypted. Enter password:');
       if (pw == null || pw.isEmpty) {
         _showSnack('Password required for encrypted backup', Colors.redAccent);
         return;
       }
-      final decrypted = _decrypt(rawData, pw);
+      final decrypted = decryptData(rawData, pw);
       if (decrypted == null) {
         _showSnack('Wrong password or corrupt file', Colors.redAccent);
         return;
