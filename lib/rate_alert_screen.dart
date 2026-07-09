@@ -185,9 +185,8 @@ class _RateAlertEditorScreenState extends State<RateAlertEditorScreen> {
       if (!mounted) return;
       final exists = _selectedWebhookId == null ||
           WebhookService.instance.webhooks.any((w) => w.id == _selectedWebhookId);
-      if (!exists) {
-        setState(() => _selectedWebhookId = null);
-      }
+      if (!exists) _selectedWebhookId = null;
+      setState(() {});
     });
   }
 
