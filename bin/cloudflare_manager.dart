@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:cloudflare_manager/api_key_gen.dart';
 import 'package:cloudflare_manager/daemon/daemon.dart';
 import 'package:cloudflare_manager/daemon/ipc_client.dart';
 import 'package:cloudflare_manager/daemon/http_api.dart';
@@ -418,18 +418,10 @@ String _getApiKey() {
   if (keyFile.existsSync()) {
     return keyFile.readAsStringSync().trim();
   }
-  final key = _generateKey();
+  final key = generateApiKey();
   keyFile.parent.createSync(recursive: true);
   keyFile.writeAsStringSync(key);
   return key;
-}
-
-String _generateKey() {
-  final random = List.generate(32, (_) {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    return chars[DateTime.now().microsecondsSinceEpoch % chars.length];
-  }).join();
-  return 'cm_${random}_' + DateTime.now().millisecondsSinceEpoch.toRadixString(36);
 }
 
 HttpApiServer? _apiServer;

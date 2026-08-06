@@ -193,10 +193,6 @@ void _printHelp() {
   exit(0);
 }
 
-String _randomCliString(int length) {
-  final r = Random();
-  return String.fromCharCodes(List.generate(length, (_) => r.nextInt(26) + 97));
-}
 
 class _RefreshTunnelsIntent extends Intent {
   const _RefreshTunnelsIntent();

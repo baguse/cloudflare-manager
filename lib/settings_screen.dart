@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+import 'api_key_gen.dart';
 import 'cloudflare_service.dart';
 import 'daemon/cf_api_client.dart';
 import 'daemon/http_api.dart';
@@ -52,7 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _apiKey = (await keyFile.readAsString()).trim();
     }
     if (_apiKey == null || _apiKey!.isEmpty) {
-      _apiKey = 'cm_${_randomString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+      _apiKey = generateApiKey();
       await keyFile.parent.create(recursive: true);
       await keyFile.writeAsString(_apiKey!);
     }
@@ -62,15 +62,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _apiEnabled = enabled == 'true';
   }
 
-  String _randomString(int length) {
-    final r = Random();
-    return String.fromCharCodes(List.generate(length, (_) => r.nextInt(26) + 97));
-  }
-
   Future<void> _regenerateApiKey() async {
     final home = Platform.environment['HOME'] ?? '/tmp';
     final keyFile = File('$home/.cloudflared/api-key');
-    final newKey = 'cm_${_randomString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    final newKey = generateApiKey();
     await keyFile.parent.create(recursive: true);
     await keyFile.writeAsString(newKey);
     setState(() => _apiKey = newKey);
