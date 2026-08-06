@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
+import '../api_key_gen.dart';
 import 'events.dart';
 import 'tunnel_runner.dart';
 import '../webhook_service.dart';
@@ -218,7 +218,7 @@ class CloudflareDaemon {
     }
     if (apiKey == null || apiKey.isEmpty) {
       // First run: generate key, start in setup mode
-      apiKey = 'cm_${_randomString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+      apiKey = generateApiKey();
       await keyFile.parent.create(recursive: true);
       await keyFile.writeAsString(apiKey);
     }
@@ -496,10 +496,5 @@ class CloudflareDaemon {
     } catch (_) {
       _log('[daemon] Webhook flush timed out');
     }
-  }
-
-  static String _randomString(int length) {
-    final r = Random();
-    return String.fromCharCodes(List.generate(length, (_) => r.nextInt(26) + 97));
   }
 }

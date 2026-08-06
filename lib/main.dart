@@ -4,7 +4,7 @@ import 'package:window_manager/window_manager.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+import 'api_key_gen.dart';
 import 'port_scanner.dart';
 import 'settings_screen.dart';
 import 'dns_editor_screen.dart';
@@ -120,7 +120,7 @@ Future<void> _handleCli(List<String> args) async {
     case 'api-key':
       final keyFile = File('$home/.cloudflared/api-key');
       if (args.length > 1 && args[1] == 'regen') {
-        final newKey = 'cm_${_randomCliString(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+        final newKey = generateApiKey();
         await keyFile.parent.create(recursive: true);
         await keyFile.writeAsString(newKey);
         print('API key regenerated: $newKey');

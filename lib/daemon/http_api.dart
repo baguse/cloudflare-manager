@@ -122,7 +122,14 @@ class HttpApiServer {
         if (await _serveStatic(request.response, routePath)) return;
       }
       if (method == 'GET' && routePath == '/health') { _handleHealth(request.response); return; }
-      if (method == 'GET' && routePath == '/status') { await _handleStatus(request.response); return; }
+      if (method == 'GET' && routePath == '/status') {
+        if (!_checkAuth(request)) {
+          _jsonResponse(request.response, 401, {'error': 'Unauthorized. Use Authorization: Bearer <key>'});
+          return;
+        }
+        await _handleStatus(request.response);
+        return;
+      }
       _jsonResponse(request.response, 404, {'error': 'Available only in normal mode'});
       return;
     }
@@ -1014,8 +1021,8 @@ async function submit(){
  const btn=document.querySelector('.btn');
  btn.disabled=true;btn.textContent='Saving…';
  try{
-  const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({port:document.getElementById('port').value,token:document.getElementById('token').value,accountId:document.getElementById('accountId').value})});
+   const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+${jsonEncode(_apiKey)}},
+    body:JSON.stringify({port:document.getElementById('port').value,token:document.getElementById('token').value,accountId:document.getElementById('accountId').value})});
   const d=await r.json();
   if(!d.ok) throw new Error(d.error||'Unknown error');
   document.getElementById('ok').style.display='block';
@@ -1030,6 +1037,10 @@ async function submit(){
   }
 
   Future<void> _handleSetup(HttpRequest request) async {
+    if (!_checkAuth(request)) {
+      _jsonResponse(request.response, 401, {'ok': false, 'error': 'Unauthorized. Provide the auto-generated API key.'});
+      return;
+    }
     final body = await _parseBody(request);
     if (body == null) return;
     final portStr = body!['port'] as String?;

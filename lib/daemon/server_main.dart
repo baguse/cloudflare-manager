@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../api_key_gen.dart';
 import 'daemon.dart' as daemon_mod;
 import 'ipc_client.dart';
 
@@ -30,7 +31,7 @@ Future<void> main(List<String> args) async {
     case 'api-key':
       final keyFile = File('$home/.cloudflared/api-key');
       if (args.length > 1 && args[1] == 'regen') {
-        final newKey = 'cm_${_randStr(32)}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+        final newKey = generateApiKey();
         await keyFile.parent.create(recursive: true);
         await keyFile.writeAsString(newKey);
         print('API key regenerated: $newKey');
@@ -59,12 +60,4 @@ Future<void> main(List<String> args) async {
       print('Usage: cloudflare-manager-server [status|api-key|install-service]');
       print('No args starts the daemon (systemd).');
   }
-}
-
-String _randStr(int len) {
-  final rnd = List<int>.generate(len, (i) {
-    final us = DateTime.now().microsecondsSinceEpoch;
-    return 97 + ((us >> (i % 16)) & 0xF) % 26;
-  });
-  return String.fromCharCodes(rnd);
 }
