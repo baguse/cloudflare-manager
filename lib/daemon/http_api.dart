@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'ipc_client.dart';
 import 'cf_api_client.dart';
@@ -723,7 +722,14 @@ class HttpApiServer {
       final creds = data['credentials'] as Map<String, dynamic>?;
       if (creds != null) {
         for (final entry in creds.entries) {
-          await File('${credsDir.path}/${entry.key}').writeAsString(json.encode(entry.value));
+          final name = entry.key;
+          // Reject anything that isn't a bare filename to prevent path
+          // traversal (matches the delete-backup validation convention).
+          if (name.isEmpty || name.contains('/') || name.contains('\\') || name.contains('..')) {
+            _jsonResponse(request.response, 400, {'ok': false, 'error': 'invalid credential filename: $name'});
+            return;
+          }
+          await File('${credsDir.path}/$name').writeAsString(json.encode(entry.value));
         }
         restored++;
       }
@@ -919,7 +925,26 @@ class HttpApiServer {
     final webDir = _webDistDir;
     if (webDir == null) return false;
 
+    // Path traversal guard: reject any traversal sequences or encoded variants
+    // before touching the filesystem.
+    String decoded;
+    try {
+      decoded = Uri.decodeComponent(path);
+    } catch (_) {
+      return false;
+    }
+    if (path.contains('..') || decoded.contains('..') || decoded.contains('\\') || decoded.contains('\u0000')) {
+      return false;
+    }
+
     final file = File('$webDir$path');
+    // Defense in depth: ensure the resolved path stays inside webDir.
+    final root = Directory(webDir).absolute.path;
+    final rootPrefix = root.endsWith('/') ? root : '$root/';
+    final resolved = file.absolute.path;
+    if (resolved != root && !resolved.startsWith(rootPrefix)) {
+      return false;
+    }
     if (!await file.exists()) return false;
 
     final contentType = path.endsWith('.css')
