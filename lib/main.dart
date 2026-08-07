@@ -95,8 +95,8 @@ Future<void> _runDaemonOnly() async {
 
   await daemon.start();
 
-  // Keep the isolate alive indefinitely
-  await Completer<void>().future;
+  // start() returns once bound; block until shutdown to keep the isolate alive.
+  await daemon.waitForShutdown();
 }
 
 Future<void> _handleCli(List<String> args) async {

@@ -10,6 +10,9 @@ Future<void> main(List<String> args) async {
   if (args.isEmpty) {
     final daemon = daemon_mod.CloudflareDaemon(configPath: configPath, onEvent: (_) {});
     await daemon.start();
+    // start() now returns once bound; block here until shutdown so the
+    // process stays alive to serve tunnels and the API.
+    await daemon.waitForShutdown();
     return;
   }
 

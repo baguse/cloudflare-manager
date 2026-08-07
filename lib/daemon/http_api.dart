@@ -43,9 +43,12 @@ class HttpApiServer {
     await WebhookService.instance.loadWebhooks();
     await RateAlertService.instance.loadAlerts();
 
-    await for (final request in _server!) {
-      _handleRequest(request);
-    }
+    // Serve requests in the background so start() returns once bound; awaiting
+    // the request stream here would block the caller forever.
+    _server!.listen(
+      _handleRequest,
+      onError: (Object e) => print('[api] Request stream error: $e'),
+    );
   }
 
   Future<void> stop() async {
