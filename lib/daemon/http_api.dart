@@ -750,7 +750,12 @@ class HttpApiServer {
       return;
     }
     final exe = Platform.resolvedExecutable;
-    Process.start(exe, ['daemon', 'start'], mode: ProcessStartMode.detached);
+    final scriptPath = Platform.script.toFilePath();
+    if (exe.endsWith('dart') || scriptPath.endsWith('.dart')) {
+      Process.start(exe, ['run', scriptPath, 'daemon', 'start'], mode: ProcessStartMode.detached);
+    } else {
+      Process.start(exe, ['daemon', 'start'], mode: ProcessStartMode.detached);
+    }
     _jsonResponse(response, 200, {'ok': true, 'message': 'Daemon starting...'});
   }
 

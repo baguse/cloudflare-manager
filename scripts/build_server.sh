@@ -5,12 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NAME="cloudflare-manager-server"
 VERSION=$(grep '^version:' "$PROJECT_DIR/pubspec.yaml" | awk '{print $2}' | tr -d '"')
-ARCH="amd64"
+
+UNAME_M=$(uname -m)
+if [ "$UNAME_M" = "arm64" ] || [ "$UNAME_M" = "aarch64" ]; then
+  ARCH="arm64"
+elif [ "$UNAME_M" = "x86_64" ]; then
+  ARCH="amd64"
+else
+  ARCH="$UNAME_M"
+fi
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
 usage() {
   echo "Usage: $0 [deb|rpm|tarball]"
-  echo "  deb     — Build .deb package"
-  echo "  rpm     — Build .rpm package"
+  echo "  deb     — Build .deb package (Linux only)"
+  echo "  rpm     — Build .rpm package (Linux only)"
   echo "  tarball — Build .tar.gz (default)"
   exit 1
 }
@@ -42,6 +51,7 @@ dependencies:
   http: ^1.0.0
   crypto: ^3.0.0
   uuid: ^4.0.0
+  args: ^2.6.0
 PUBSPEC
 
 cd "$SERVER_BUILD"
@@ -84,7 +94,38 @@ exec /usr/lib/$NAME/$NAME "\$@"
 LAUNCH
 chmod +x "$OUTDIR/usr/bin/$NAME"
 
-# systemd service
+# Service configurations
+if [ "$OS" = "darwin" ]; then
+  mkdir -p "$OUTDIR/Library/LaunchAgents"
+  cat > "$OUTDIR/Library/LaunchAgents/com.cloudflare.manager.server.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloudflare.manager.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/$NAME</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/$NAME.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/$NAME.err</string>
+</dict>
+</plist>
+PLIST
+fi
+
 mkdir -p "$OUTDIR/usr/lib/systemd/system"
 cat > "$OUTDIR/usr/lib/systemd/system/$NAME.service" << SERVICE
 [Unit]
@@ -108,6 +149,14 @@ SERVICE
 echo "=== Building package ==="
 case "$FORMAT" in
   deb)
+    if ! command -v dpkg-deb &>/dev/null; then
+      echo "WARNING: dpkg-deb not found. Creating tarball instead."
+      cd "$PROJECT_DIR/build"
+      TAR_NAME="$NAME-v${VERSION}-${OS}-${ARCH}.tar.gz"
+      tar czf "$TAR_NAME" "$NAME-$VERSION"
+      echo "Done: $PROJECT_DIR/build/$TAR_NAME"
+      exit 0
+    fi
     DEB_CONTROL="$OUTDIR/DEBIAN"
     mkdir -p "$DEB_CONTROL"
     INSTALLED_SIZE=$(du -sk "$OUTDIR/usr" | cut -f1)
@@ -131,6 +180,14 @@ CONTROL
     echo "Done: $DEB_FILE"
     ;;
   rpm)
+    if ! command -v rpmbuild &>/dev/null; then
+      echo "WARNING: rpmbuild not found. Creating tarball instead."
+      cd "$PROJECT_DIR/build"
+      TAR_NAME="$NAME-v${VERSION}-${OS}-${ARCH}.tar.gz"
+      tar czf "$TAR_NAME" "$NAME-$VERSION"
+      echo "Done: $PROJECT_DIR/build/$TAR_NAME"
+      exit 0
+    fi
     RPM_BUILD_ROOT="$HOME/rpmbuild"
     rm -rf "$RPM_BUILD_ROOT"
     mkdir -p "$RPM_BUILD_ROOT/BUILD" "$RPM_BUILD_ROOT/RPMS" "$RPM_BUILD_ROOT/SPECS" "$RPM_BUILD_ROOT/SRPMS"
@@ -195,7 +252,9 @@ SPEC
     ;;
   *)
     cd "$PROJECT_DIR/build"
-    tar czf "$NAME-v${VERSION}.tar.gz" "$NAME-$VERSION"
-    echo "Done: $PROJECT_DIR/build/$NAME-v${VERSION}.tar.gz"
+    TAR_NAME="$NAME-v${VERSION}-${OS}-${ARCH}.tar.gz"
+    tar czf "$TAR_NAME" "$NAME-$VERSION"
+    ln -sf "$TAR_NAME" "$NAME-v${VERSION}.tar.gz" 2>/dev/null || true
+    echo "Done: $PROJECT_DIR/build/$TAR_NAME"
     ;;
 esac

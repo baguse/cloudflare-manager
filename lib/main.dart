@@ -39,24 +39,40 @@ void _log(String msg) {
 }
 
 void main(List<String> args) async {
-  final startHidden = args.contains('--hidden');
+  // Filter out macOS Finder process serial number arguments (-psn_0_...)
+  final cleanArgs = args.where((a) => !a.startsWith('-psn_')).toList();
+  final startHidden = cleanArgs.contains('--hidden');
 
-  // Headless modes — no Flutter engine needed
-  if (args.contains('daemon') && args.contains('start')) {
+  // Headless daemon start
+  if (cleanArgs.contains('daemon') && cleanArgs.contains('start')) {
     await _runDaemonOnly();
     return;
   }
 
   // CLI-only commands — no GUI
-  final cliCommands = ['status', 'api-key', 'install-service', '--version', '-v', 'help', '--help'];
-  if (args.isNotEmpty && !args.contains('--hidden') && !args.contains('daemon')) {
-    final cmd = args.first;
+  final cliCommands = [
+    'status',
+    'start',
+    'stop',
+    'restart',
+    'api-key',
+    'install-service',
+    'uninstall-service',
+    'daemon',
+    'tunnel',
+    'service',
+    '--version',
+    '-v',
+    'help',
+    '--help',
+  ];
+
+  if (cleanArgs.isNotEmpty && !cleanArgs.contains('--hidden')) {
+    final cmd = cleanArgs.first;
     if (cliCommands.contains(cmd)) {
-      await _handleCli(args);
-    } else {
-      _printHelp();
+      await _handleCli(cleanArgs);
+      return;
     }
-    return;
   }
 
   // GUI mode — needs Flutter engine
@@ -93,7 +109,18 @@ Future<void> _runDaemonOnly() async {
     onEvent: (event) {},
   );
 
+  ProcessSignal.sigterm.watch().listen((_) {
+    print('\n[cli] Received SIGTERM, shutting down...');
+    daemon.stop().then((_) => exit(0));
+  });
+
+  ProcessSignal.sigint.watch().listen((_) {
+    print('\n[cli] Received SIGINT, shutting down...');
+    daemon.stop().then((_) => exit(0));
+  });
+
   await daemon.start();
+  print('[cli] Daemon running. Press Ctrl+C to stop.');
 
   // start() returns once bound; block until shutdown to keep the isolate alive.
   await daemon.waitForShutdown();
@@ -105,18 +132,79 @@ Future<void> _handleCli(List<String> args) async {
 
   switch (cmd) {
     case 'status':
-      final client = DaemonClient();
-      if (await client.connect()) {
-        final result = await client.send('status');
-        if (result['ok'] == true) {
-          final tunnels = result['tunnels'] as List? ?? [];
-          print('Daemon: running, ${tunnels.length} tunnel(s)');
-        }
-        client.disconnect();
+      await _cliStatus();
+      break;
+
+    case 'start':
+      await _runDaemonOnly();
+      break;
+
+    case 'stop':
+      await _cliStop();
+      break;
+
+    case 'restart':
+      await _cliStop();
+      await Future.delayed(const Duration(seconds: 1));
+      await _runDaemonOnly();
+      break;
+
+    case 'daemon':
+      final sub = args.length > 1 ? args[1] : '';
+      if (sub == 'start') {
+        await _runDaemonOnly();
+      } else if (sub == 'stop') {
+        await _cliStop();
+      } else if (sub == 'status') {
+        await _cliStatus();
       } else {
-        print('Daemon: not running');
+        print('Usage: cloudflare-manager daemon <start|stop|status>');
       }
       break;
+
+    case 'tunnel':
+      final sub = args.length > 1 ? args[1] : 'list';
+      if (sub == 'logs') {
+        final tunnelId = args.length > 2 ? args[2] : null;
+        if (tunnelId == null) {
+          print('Usage: cloudflare-manager tunnel logs <tunnel-id>');
+          break;
+        }
+        final client = DaemonClient();
+        if (await client.connect()) {
+          final result = await client.getTunnelLogs(tunnelId);
+          client.disconnect();
+          if (result['ok'] == true) {
+            final logs = result['logs'] as List? ?? [];
+            for (final l in logs) print(l);
+          } else {
+            print('Error: ${result['error']}');
+          }
+        } else {
+          print('Daemon: not running');
+        }
+      } else {
+        final client = DaemonClient();
+        if (await client.connect()) {
+          final result = await client.getTunnelList();
+          client.disconnect();
+          if (result['ok'] == true) {
+            final tunnels = result['tunnels'] as List? ?? [];
+            if (tunnels.isEmpty) {
+              print('No tunnels managed by daemon.');
+            } else {
+              print('Managed tunnels:');
+              for (final t in tunnels) {
+                print('  ${t['tunnelId']}: ${t['state']} (${t['hostname']}:${t['port']})');
+              }
+            }
+          }
+        } else {
+          print('Daemon: not running');
+        }
+      }
+      break;
+
     case 'api-key':
       final keyFile = File('$home/.cloudflared/api-key');
       if (args.length > 1 && args[1] == 'regen') {
@@ -125,18 +213,135 @@ Future<void> _handleCli(List<String> args) async {
         await keyFile.writeAsString(newKey);
         print('API key regenerated: $newKey');
       } else if (await keyFile.exists()) {
-        print(await keyFile.readAsString());
+        print((await keyFile.readAsString()).trim());
       } else {
         print('No API key. Start the daemon first.');
       }
       break;
+
     case 'install-service':
-      {
-        final serviceDir = '$home/.config/systemd/user';
-        await Directory(serviceDir).create(recursive: true);
-        // Generate inline service file since the GUI package may not ship one
-        final exe = Platform.resolvedExecutable;
-        await File('$serviceDir/cloudflare-manager.service').writeAsString('''
+      await _cliInstallService(home);
+      break;
+
+    case 'uninstall-service':
+      await _cliUninstallService(home);
+      break;
+
+    case 'service':
+      final sub = args.length > 1 ? args[1] : '';
+      if (sub == 'install') {
+        await _cliInstallService(home);
+      } else if (sub == 'uninstall') {
+        await _cliUninstallService(home);
+      } else if (sub == 'status') {
+        await _cliServiceStatus(home);
+      } else {
+        print('Usage: cloudflare-manager service <install|uninstall|status>');
+      }
+      break;
+
+    case '--version':
+    case '-v':
+      print('cloudflare-manager v1.0.0');
+      break;
+
+    case 'help':
+    case '--help':
+      _printHelp();
+      return;
+
+    default:
+      print('Unknown command: $cmd');
+      _printHelp();
+      return;
+  }
+  exit(0);
+}
+
+Future<void> _cliStatus() async {
+  final client = DaemonClient();
+  if (await client.connect()) {
+    final result = await client.send('status');
+    if (result['ok'] == true) {
+      final tunnels = result['tunnels'] as List? ?? [];
+      print('Daemon: running, ${tunnels.length} tunnel(s)');
+      for (final t in tunnels) {
+        print('  ${t['tunnelId']}: ${t['state']} (${t['hostname']}:${t['port']})');
+      }
+    }
+    client.disconnect();
+  } else {
+    print('Daemon: not running');
+  }
+}
+
+Future<void> _cliStop() async {
+  final client = DaemonClient();
+  if (await client.connect()) {
+    final result = await client.shutdown();
+    client.disconnect();
+    if (result['ok'] == true) {
+      print('Daemon stopped.');
+    } else {
+      print('Failed to stop daemon: ${result['error']}');
+    }
+  } else {
+    print('Daemon: not running');
+  }
+}
+
+Future<void> _cliInstallService(String home) async {
+  final exe = Platform.resolvedExecutable;
+  if (Platform.isMacOS) {
+    final dir = Directory('$home/Library/LaunchAgents');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final file = File('${dir.path}/com.cloudflare.manager.daemon.plist');
+    await file.writeAsString('''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloudflare.manager.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$exe</string>
+        <string>daemon</string>
+        <string>start</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$home</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$home/.cloudflared</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/cloudflare-manager-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/cloudflare-manager-daemon.err</string>
+</dict>
+</plist>
+''');
+    final uidResult = await Process.run('id', ['-u']);
+    final uid = uidResult.stdout.toString().trim().isNotEmpty ? uidResult.stdout.toString().trim() : '501';
+    final domain = 'gui/$uid';
+
+    await Process.run('launchctl', ['bootout', '$domain/com.cloudflare.manager.daemon']);
+    await Process.run('launchctl', ['unload', '-w', file.path]);
+    final bootResult = await Process.run('launchctl', ['bootstrap', domain, file.path]);
+    if (bootResult.exitCode != 0) {
+      await Process.run('launchctl', ['load', '-w', file.path]);
+    }
+    print('User service installed and started (launchd).');
+  } else if (Platform.isLinux) {
+    final serviceDir = '$home/.config/systemd/user';
+    await Directory(serviceDir).create(recursive: true);
+    final file = File('$serviceDir/cloudflare-manager.service');
+    await file.writeAsString('''
 [Unit]
 Description=Cloudflare Tunnel Manager
 After=network-online.target
@@ -154,26 +359,61 @@ StandardError=journal
 [Install]
 WantedBy=default.target
 ''');
-        await Process.run('systemctl', ['--user', 'daemon-reload']);
-        await Process.run('systemctl', ['--user', 'enable', 'cloudflare-manager']);
-        await Process.run('systemctl', ['--user', 'start', 'cloudflare-manager']);
-        print('User service enabled and started.');
-      }
-      break;
-    case '--version':
-    case '-v':
-      print('cloudflare-manager v1.0.0');
-      break;
-    case 'help':
-    case '--help':
-      _printHelp();
-      return;
-    default:
-      print('Unknown command: $cmd');
-      _printHelp();
-      return;
+    await Process.run('systemctl', ['--user', 'daemon-reload']);
+    await Process.run('systemctl', ['--user', 'enable', 'cloudflare-manager']);
+    await Process.run('systemctl', ['--user', 'start', 'cloudflare-manager']);
+    print('User service enabled and started (systemd).');
+  } else {
+    print('Unsupported platform for service installation.');
   }
-  exit(0);
+}
+
+Future<void> _cliUninstallService(String home) async {
+  if (Platform.isMacOS) {
+    final uidResult = await Process.run('id', ['-u']);
+    final uid = uidResult.stdout.toString().trim().isNotEmpty ? uidResult.stdout.toString().trim() : '501';
+    final domain = 'gui/$uid';
+
+    await Process.run('launchctl', ['bootout', '$domain/com.cloudflare.manager.daemon']);
+    final file = File('$home/Library/LaunchAgents/com.cloudflare.manager.daemon.plist');
+    if (await file.exists()) {
+      await Process.run('launchctl', ['unload', '-w', file.path]);
+      await file.delete();
+    }
+    print('User service removed.');
+  } else if (Platform.isLinux) {
+    await Process.run('systemctl', ['--user', 'stop', 'cloudflare-manager']);
+    await Process.run('systemctl', ['--user', 'disable', 'cloudflare-manager']);
+    final file = File('$home/.config/systemd/user/cloudflare-manager.service');
+    if (await file.exists()) await file.delete();
+    await Process.run('systemctl', ['--user', 'daemon-reload']);
+    print('User service removed.');
+  } else {
+    print('Unsupported platform for service uninstallation.');
+  }
+}
+
+Future<void> _cliServiceStatus(String home) async {
+  if (Platform.isMacOS) {
+    final file = File('$home/Library/LaunchAgents/com.cloudflare.manager.daemon.plist');
+    if (!await file.exists()) {
+      print('Service: not installed');
+      return;
+    }
+    final uidResult = await Process.run('id', ['-u']);
+    final uid = uidResult.stdout.toString().trim().isNotEmpty ? uidResult.stdout.toString().trim() : '501';
+    final domain = 'gui/$uid';
+
+    final result = await Process.run('launchctl', ['print', '$domain/com.cloudflare.manager.daemon']);
+    final running = result.exitCode == 0;
+    print('Service: ${running ? "running (loaded)" : "installed (not running)"}');
+  } else if (Platform.isLinux) {
+    final result = await Process.run('systemctl', ['--user', 'is-active', 'cloudflare-manager']);
+    final status = result.stdout.toString().trim();
+    print('Service: $status');
+  } else {
+    print('Unsupported platform for service status.');
+  }
 }
 
 void _printHelp() {
@@ -182,12 +422,17 @@ void _printHelp() {
   print('Usage: cloudflare-manager [command]');
   print('');
   print('Commands:');
-  print('  status          Show daemon status and tunnel count');
-  print('  api-key         Show the API key');
-  print('  api-key regen   Regenerate the API key');
-  print('  install-service Install user systemd service (auto-start)');
-  print('  daemon start    Start headless daemon');
-  print('  --version       Show version');
+  print('  status             Show daemon status and tunnel count');
+  print('  start              Start headless daemon');
+  print('  stop               Stop running daemon');
+  print('  restart            Restart daemon');
+  print('  api-key [regen]    Show or regenerate HTTP API key');
+  print('  install-service    Install auto-start service (launchd on macOS, systemd on Linux)');
+  print('  uninstall-service  Remove auto-start service');
+  print('  daemon <cmd>       Manage daemon (start|stop|status)');
+  print('  tunnel <cmd>       Manage tunnels (list|logs)');
+  print('  service <cmd>      Manage service (install|uninstall|status)');
+  print('  --version, -v      Show version');
   print('');
   print('No args launches the GUI.');
   exit(0);

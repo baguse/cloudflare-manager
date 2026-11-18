@@ -38,7 +38,12 @@ class WebhookService {
     final ts = DateTime.now().toIso8601String();
     final line = '[$ts] $message';
     print(line);
-    _debugLogFile.writeAsString('$line\n', mode: FileMode.append, flush: true).catchError((_) {});
+    try {
+      if (!_debugLogFile.parent.existsSync()) {
+        _debugLogFile.parent.createSync(recursive: true);
+      }
+      _debugLogFile.writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
   }
 
   Stream<List<WebhookLog>> get logsStream => _logsController.stream;
