@@ -399,25 +399,37 @@ class CloudflareService {
     return res['ok'] == true;
   }
 
-  // Delete a Tunnel
-  static Future<bool> deleteTunnel(String tunnelId) async {
+  // Delete a Tunnel with full result details
+  static Future<Map<String, dynamic>> deleteTunnelResult(String tunnelId, {bool cascade = true}) async {
     try {
       final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
 
+      final url = cascade
+          ? '$baseUrl/accounts/$accountId/cfd_tunnel/$tunnelId?cascade=true'
+          : '$baseUrl/accounts/$accountId/cfd_tunnel/$tunnelId';
       final response = await http.delete(
-        Uri.parse('$baseUrl/accounts/$accountId/cfd_tunnel/$tunnelId'),
+        Uri.parse(url),
         headers: headers,
       );
 
+      final data = json.decode(response.body);
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return data['success'] == true;
+        if (data['success'] == true) {
+          return {'ok': true};
+        }
       }
+      return {'ok': false, 'error': _extractErrorMessage(data, statusCode: response.statusCode)};
     } catch (e) {
       print('Error deleting tunnel: $e');
+      return {'ok': false, 'error': 'Error deleting tunnel: $e'};
     }
-    return false;
+  }
+
+  // Delete a Tunnel (backward compatibility)
+  static Future<bool> deleteTunnel(String tunnelId, {bool cascade = true}) async {
+    final res = await deleteTunnelResult(tunnelId, cascade: cascade);
+    return res['ok'] == true;
   }
 
   static Future<bool> deleteTunnelDnsRecords(String tunnelId) async {

@@ -106,13 +106,17 @@ class TunnelOperations {
 
     // Delete from Cloudflare
     final dnsOk = await CloudflareService.deleteTunnelDnsRecords(tunnelId);
-    final tunnelOk = await CloudflareService.deleteTunnel(tunnelId);
+    final tunnelRes = await CloudflareService.deleteTunnelResult(tunnelId, cascade: true);
 
     // Fire webhook
     WebhookService.instance.triggerWebhooks(
       DaemonEvent(type: DaemonEventType.tunnelDeleted, tunnelId: tunnelId),
     ).catchError((_) {});
 
-    return {'ok': tunnelOk, 'dnsDeleted': dnsOk};
+    return {
+      'ok': tunnelRes['ok'] == true,
+      'dnsDeleted': dnsOk,
+      if (tunnelRes['error'] != null) 'error': tunnelRes['error'],
+    };
   }
 }
