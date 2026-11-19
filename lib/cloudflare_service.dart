@@ -246,7 +246,7 @@ class CloudflareService {
       final msg = err is Map ? (err['message'] ?? err.toString()) : err.toString();
       final code = err is Map ? err['code'] : null;
       if (code == 10000 || msg.toString().toLowerCase().contains('authentication error')) {
-        return 'Cloudflare authentication error (code 10000): Your Cloudflare API Token is missing "Account > Cloudflare Tunnel > Edit" permission. Please add this permission to your API token in Cloudflare Dashboard.';
+        return 'Cloudflare Permission Denied (Error 10000): The saved API token is valid, but it does NOT have the "Account > Cloudflare Tunnel > Edit" permission. In Cloudflare Dashboard, edit this token and add permission: "Account" -> "Cloudflare Tunnel" -> "Edit".';
       }
       return 'Cloudflare error ($code): $msg';
     }
@@ -258,6 +258,59 @@ class CloudflareService {
       return 'Cloudflare returned HTTP $statusCode';
     }
     return 'Unknown Cloudflare API error';
+  }
+
+  static Future<Map<String, dynamic>> verifyCredentials() async {
+    final token = await AppStorage.instance.read(key: tokenKey);
+    final accountId = await AppStorage.instance.read(key: accountIdKey);
+    if (token == null || token.trim().isEmpty) {
+      return {'ok': false, 'error': 'No Cloudflare API Token saved in settings.'};
+    }
+    if (accountId == null || accountId.trim().isEmpty) {
+      return {'ok': false, 'error': 'No Cloudflare Account ID saved in settings.'};
+    }
+
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$baseUrl/zones'),
+        headers: headers,
+      );
+
+      final data = json.decode(response.body);
+      if (response.statusCode != 200 || data['success'] != true) {
+        return {'ok': false, 'error': _extractErrorMessage(data, statusCode: response.statusCode)};
+      }
+
+      final zones = (data['result'] as List?) ?? [];
+      final permissions = zones.isNotEmpty && zones.first['permissions'] is List
+          ? (zones.first['permissions'] as List).cast<String>()
+          : <String>[];
+
+      // Test account tunnel access
+      final tunnelResp = await http.get(
+        Uri.parse('$baseUrl/accounts/$accountId/cfd_tunnel'),
+        headers: headers,
+      );
+      final tunnelData = json.decode(tunnelResp.body);
+      if (tunnelResp.statusCode != 200 || tunnelData['success'] != true) {
+        return {
+          'ok': false,
+          'error': 'Account ID or Tunnel access error: ${_extractErrorMessage(tunnelData, statusCode: tunnelResp.statusCode)}',
+        };
+      }
+
+      return {
+        'ok': true,
+        'tokenPrefix': token.length > 8 ? '${token.substring(0, 8)}...' : token,
+        'accountId': accountId,
+        'zoneCount': zones.length,
+        'zones': zones.map((z) => z['name']).toList(),
+        'permissions': permissions,
+      };
+    } catch (e) {
+      return {'ok': false, 'error': 'Network or connection error: $e'};
+    }
   }
 
   // Create a new Zero Trust Tunnel with full result details

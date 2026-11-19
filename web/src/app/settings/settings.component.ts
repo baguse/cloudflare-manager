@@ -13,6 +13,12 @@ import { ToastService } from '../toast.service';
     <div class="card"><h3 class="section-title">Cloudflare API Credentials</h3><p class="section-desc">Enter your Cloudflare API credentials to manage tunnels.</p>
       <div class="setting-row"><span>Cloudflare Account ID</span><input class="input" [(ngModel)]="settings['cf_account_id']" style="width:320px" placeholder="Account ID"></div>
       <div class="setting-row"><span>Cloudflare API Token</span><input class="input" [(ngModel)]="settings['cf_api_token']" style="width:320px" placeholder="API Token" type="password"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" (click)="verifyCloudflareCredentials()"><span class="material-icons" style="font-size:16px">verified_user</span> Verify Cloudflare Token</button>
+        @if (cfVerifyStatus) {
+          <span style="font-size:12px;line-height:1.4" [style.color]="cfVerifyStatus.ok ? 'var(--green)' : 'var(--red)'">{{cfVerifyStatus.msg}}</span>
+        }
+      </div>
     </div>
     <div class="card"><h3 class="section-title">cloudflared Binary Detection</h3><p class="section-desc">Host executable required to run and manage Cloudflare Tunnels.</p>
       <div class="setting-row">
@@ -68,6 +74,7 @@ export class SettingsComponent implements OnInit {
   private toast = inject(ToastService);
   loading = signal(false);
   settings: any = {};
+  cfVerifyStatus: { ok: boolean; msg: string } | null = null;
 
   ngOnInit() { this.loadSettings(); }
 
@@ -78,6 +85,35 @@ export class SettingsComponent implements OnInit {
       this.settings = r.settings||{};
       await this.api.checkCloudflared();
     } catch {} finally {
+      this.loading.set(false);
+    }
+  }
+
+  async verifyCloudflareCredentials() {
+    this.loading.set(true);
+    this.cfVerifyStatus = null;
+    try {
+      if (this.settings['cf_account_id'] || this.settings['cf_api_token']) {
+        await this.api.call('/api/settings', 'PATCH', {
+          cf_account_id: this.settings['cf_account_id'],
+          cf_api_token: this.settings['cf_api_token'],
+        });
+      }
+      const res = await this.api.call('/api/cf-config/verify', 'GET');
+      if (res.ok) {
+        this.cfVerifyStatus = {
+          ok: true,
+          msg: `Valid! Accessible zones: ${res.zones?.join(', ') || res.zoneCount || '0'}.`,
+        };
+        this.toast.show('Cloudflare credentials verified successfully!');
+      } else {
+        this.cfVerifyStatus = { ok: false, msg: res.error || 'Verification failed' };
+        this.toast.show(res.error || 'Verification failed', true);
+      }
+    } catch (e: any) {
+      this.cfVerifyStatus = { ok: false, msg: e.error || e.message || 'Connection failed' };
+      this.toast.show('Verification failed', true);
+    } finally {
       this.loading.set(false);
     }
   }

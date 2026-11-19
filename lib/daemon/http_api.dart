@@ -338,6 +338,10 @@ class HttpApiServer {
         case 'GET /cf-config':
           await _handleCfConfigStatus(request.response);
           break;
+        case 'GET /cf-config/verify':
+          final result = await CloudflareService.verifyCredentials();
+          _jsonResponse(request.response, 200, result);
+          break;
         default:
           _jsonResponse(request.response, 404, {'error': 'Not found', 'path': '$method $path'});
       }
@@ -817,7 +821,17 @@ class HttpApiServer {
   Future<void> _handleGetSettings(HttpResponse response) async {
     final data = <String, dynamic>{};
     final home = Platform.environment['HOME'] ?? '/tmp';
-    for (final key in ['auto_bind_min_port', 'auto_bind_max_port', 'api_enabled', 'api_port', 'close_to_tray', 'auto_start', 'theme_mode']) {
+    for (final key in [
+      'auto_bind_min_port',
+      'auto_bind_max_port',
+      'api_enabled',
+      'api_port',
+      'close_to_tray',
+      'auto_start',
+      'theme_mode',
+      CloudflareService.tokenKey,
+      CloudflareService.accountIdKey,
+    ]) {
       data[key] = await AppStorage.instance.read(key: key);
     }
     final dcfg = File('$home/.cloudflared/daemon.json');
@@ -832,6 +846,11 @@ class HttpApiServer {
     if (body == null) return;
     for (final entry in body.entries) {
       final newVal = entry.value?.toString();
+      // Guard: do not wipe existing Cloudflare credentials if an empty string is passed
+      if ((entry.key == CloudflareService.tokenKey || entry.key == CloudflareService.accountIdKey) &&
+          (newVal == null || newVal.trim().isEmpty)) {
+        continue;
+      }
       final oldVal = await AppStorage.instance.read(key: entry.key);
       if (newVal != oldVal) {
         await AppStorage.instance.write(key: entry.key, value: newVal);
