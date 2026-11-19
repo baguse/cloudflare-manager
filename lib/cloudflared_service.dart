@@ -22,12 +22,19 @@ class TunnelInfo {
 class CloudflaredService {
   static String _executablePath = 'cloudflared';
   static String get resolvedPath => _executablePath;
+  static String? _cachedVersion;
 
   static String _normalizeBase64(String input) {
     return input.padRight((input.length + 3) ~/ 4 * 4, '=');
   }
 
-  static Future<bool> isInstalled() async {
+  static Future<bool> isInstalled({bool refresh = false}) async {
+    if (!refresh && _cachedVersion != null) return true;
+    if (refresh) {
+      _cachedVersion = null;
+      _executablePath = 'cloudflared';
+    }
+
     final List<String> searchPaths = [];
 
     try {
@@ -43,7 +50,12 @@ class CloudflaredService {
       '/usr/local/bin/cloudflared',
       '/opt/homebrew/bin/cloudflared',
       '/usr/bin/cloudflared',
+      '/bin/cloudflared',
+      '/usr/sbin/cloudflared',
+      '/sbin/cloudflared',
       if (home.isNotEmpty) '$home/.cloudflared/cloudflared',
+      if (home.isNotEmpty) '$home/.local/bin/cloudflared',
+      if (home.isNotEmpty) '$home/bin/cloudflared',
     ]);
 
     final seen = <String>{};
@@ -54,6 +66,8 @@ class CloudflaredService {
         final result = await Process.run(path, ['--version']);
         if (result.exitCode == 0) {
           _executablePath = path;
+          final out = (result.stdout as String).trim();
+          _cachedVersion = out.isNotEmpty ? out : (result.stderr as String).trim();
           return true;
         }
       } catch (_) {}
@@ -67,6 +81,26 @@ class CloudflaredService {
     }
 
     return false;
+  }
+
+  static Future<Map<String, dynamic>> checkCloudflared({bool refresh = false}) async {
+    final installed = await isInstalled(refresh: refresh);
+    String? version = _cachedVersion;
+    if (installed && (version == null || version.isEmpty)) {
+      try {
+        final result = await Process.run(_executablePath, ['--version']);
+        if (result.exitCode == 0) {
+          final out = (result.stdout as String).trim();
+          version = out.isNotEmpty ? out : (result.stderr as String).trim();
+          _cachedVersion = version;
+        }
+      } catch (_) {}
+    }
+    return {
+      'installed': installed,
+      'path': installed ? _executablePath : null,
+      'version': version,
+    };
   }
 
   static Future<Set<String>> getRunningTunnelIds() async {

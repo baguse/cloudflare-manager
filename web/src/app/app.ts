@@ -36,6 +36,18 @@ import { ConfirmService } from './confirm.service';
           <button class="theme-btn" (click)="toggleTheme()"><span class="material-icons" style="font-size:16px">{{theme()==='dark'?'dark_mode':'light_mode'}}</span></button>
           <button class="theme-btn" (click)="logout()" title="Logout" style="color:var(--red)"><span class="material-icons" style="font-size:16px">logout</span></button>
           <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>@if (!sidebarCollapsed()) { {{connLabel()}} }</div>
+          @if (api.cloudflared(); as cf) {
+            @if (!sidebarCollapsed()) {
+              <div class="sidebar-status" [style.color]="cf.installed ? 'var(--green)' : 'var(--red)'" [title]="cf.installed ? (cf.path + (cf.version ? ' (' + cf.version + ')' : '')) : 'cloudflared binary not found on host'">
+                <span class="material-icons" style="font-size:16px">{{cf.installed ? 'check_circle' : 'error'}}</span>
+                <span style="font-size:11px">{{cf.installed ? 'cloudflared detected' : 'cloudflared not found'}}</span>
+              </div>
+            } @else {
+              <div class="sidebar-status" [title]="cf.installed ? ('cloudflared: ' + cf.path) : 'cloudflared not found'">
+                <span class="material-icons" [style.color]="cf.installed ? 'var(--green)' : 'var(--red)'" style="font-size:16px">{{cf.installed ? 'check_circle' : 'error'}}</span>
+              </div>
+            }
+          }
         </aside>
         <main class="main" [class.main-expanded]="sidebarCollapsed()">
           <router-outlet></router-outlet>
@@ -98,7 +110,12 @@ export class AppComponent implements OnInit, OnDestroy {
   constructor(api: ApiService, private router: Router) { this.api = api; }
   ngOnInit() {
     document.documentElement.className = this.theme();
-    if (this.api.configured) { this.connected.set(true); this.router.navigateByUrl('/'); this.api.startWs(); }
+    if (this.api.configured) {
+      this.connected.set(true);
+      this.router.navigateByUrl('/');
+      this.api.startWs();
+      this.api.checkCloudflared();
+    }
     window.addEventListener('resize', this._onResize);
   }
 
@@ -110,6 +127,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.api.connect(this.url, this.key);
       this.connected.set(true);
       this.router.navigateByUrl('/');
+      await this.api.checkCloudflared();
     } catch {
       this.toast.show('Invalid API key or connection failed', true);
     }

@@ -137,6 +137,12 @@ class HttpApiServer {
         if (await _serveStatic(request.response, routePath)) return;
       }
       if (method == 'GET' && routePath == '/health') { _handleHealth(request.response); return; }
+      if (method == 'GET' && routePath == '/cloudflared') {
+        final refresh = request.uri.queryParameters['refresh'] == 'true';
+        final info = await CloudflaredService.checkCloudflared(refresh: refresh);
+        _jsonResponse(request.response, 200, {'ok': true, ...info});
+        return;
+      }
       if (method == 'GET' && routePath == '/status') {
         if (!_checkAuth(request)) {
           _jsonResponse(request.response, 401, {'error': 'Unauthorized. Use Authorization: Bearer <key>'});
@@ -178,6 +184,14 @@ class HttpApiServer {
       return;
     }
 
+    // Cloudflared detection check - no auth required
+    if (method == 'GET' && routePath == '/cloudflared') {
+      final refresh = request.uri.queryParameters['refresh'] == 'true';
+      final info = await CloudflaredService.checkCloudflared(refresh: refresh);
+      _jsonResponse(request.response, 200, {'ok': true, ...info});
+      return;
+    }
+
     // WebSocket for real-time daemon events
     if (method == 'GET' && routePath == '/ws') {
       await _handleWebSocket(request);
@@ -196,6 +210,11 @@ class HttpApiServer {
       switch ('$method $routePath') {
         case 'GET /status':
           await _handleStatus(request.response);
+          break;
+        case 'GET /cloudflared':
+          final refresh = request.uri.queryParameters['refresh'] == 'true';
+          final info = await CloudflaredService.checkCloudflared(refresh: refresh);
+          _jsonResponse(request.response, 200, {'ok': true, ...info});
           break;
         case 'GET /tunnels/all':
           await _handleListAllTunnels(request.response);
@@ -350,15 +369,25 @@ class HttpApiServer {
   }
 
   Future<void> _handleStatus(HttpResponse response) async {
+    Map<String, dynamic> result;
     if (onGetStatusDirect != null) {
-      _jsonResponse(response, 200, await onGetStatusDirect!());
-      return;
+      result = await onGetStatusDirect!();
+    } else {
+      result = await _ipc('status');
     }
-    final result = await _ipc('status');
     if (result['ok'] == true) {
+      if (!result.containsKey('cloudflared')) {
+        result['cloudflared'] = await CloudflaredService.checkCloudflared();
+      }
       _jsonResponse(response, 200, result);
     } else {
-      _jsonResponse(response, 200, {'ok': true, 'running': false, 'tunnels': const [], 'eventCount': 0});
+      _jsonResponse(response, 200, {
+        'ok': true,
+        'running': false,
+        'tunnels': const [],
+        'eventCount': 0,
+        'cloudflared': await CloudflaredService.checkCloudflared(),
+      });
     }
   }
 
@@ -1052,6 +1081,10 @@ input:focus{border-color:var(--accent);outline:none}
 <p class="sub">First-run setup — your API key has been auto-generated. Configure your Cloudflare credentials to get started.</p>
 <label>API Key (auto-generated — copy this now)</label>
 <div class="mono" id="apiKey">$_apiKey</div>
+<label>cloudflared Binary Status</label>
+<div id="cfStatus" style="font-size:12px;display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:var(--bg);margin-top:4px;">
+  <span style="color:var(--muted)">Checking cloudflared...</span>
+</div>
 <label>API Port</label>
 <input id="port" value="$port" placeholder="9845">
 <label>Cloudflare API Token</label>
@@ -1063,6 +1096,14 @@ input:focus{border-color:var(--accent);outline:none}
 <div class="error" id="err"></div>
 </div>
 <script>
+fetch('/api/cloudflared').then(r=>r.json()).then(d=>{
+ const el=document.getElementById('cfStatus');
+ if(d.installed){
+  el.innerHTML='<span style="color:#4ade80;font-weight:600">✓ Detected: '+(d.path||'cloudflared')+(d.version?' ('+d.version+')':'')+'</span>';
+ }else{
+  el.innerHTML='<span style="color:#f87171;font-weight:600">⚠ Not Found</span><span style="color:var(--muted);font-size:11px;margin-left:4px">— install via <code>brew install cloudflared</code></span>';
+ }
+}).catch(()=>{});
 async function submit(){
  document.getElementById('err').style.display='none';
  document.getElementById('ok').style.display='none';
@@ -1170,6 +1211,7 @@ SwaggerUIBundle({url:"/openapi.json",dom_id:"#swagger-ui",deepLinking:true,prese
   Map<String, dynamic> _buildOpenApiPaths() {
     final p = <String, dynamic>{
       '/health': {'get': {'summary': 'Health check', 'security': [], 'responses': {'200': {'description': 'OK'}}}},
+      '/cloudflared': {'get': {'summary': 'Check cloudflared binary detection and version', 'security': [], 'parameters': [{'name': 'refresh', 'in': 'query', 'required': false, 'schema': {'type': 'boolean'}}], 'responses': {'200': {'description': 'Detection info'}}}},
       '/status': {'get': {'summary': 'Daemon and tunnel status', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Daemon status'}}}},
       '/tunnels': {
         'get': {'summary': 'List all tunnels', 'security': [{'bearerAuth': []}], 'responses': {'200': {'description': 'Tunnel list'}}},

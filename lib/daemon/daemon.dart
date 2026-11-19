@@ -240,6 +240,7 @@ class CloudflareDaemon {
               return j;
             }).toList(),
             'eventCount': _eventLog.length,
+            'cloudflared': await CloudflaredService.checkCloudflared(),
           };
         },
         onIpcCall: (String cmd, Map<String, dynamic>? args) async {
@@ -257,7 +258,12 @@ class CloudflareDaemon {
                   return j;
                 }).toList(),
                 'eventCount': _eventLog.length,
+                'cloudflared': await CloudflaredService.checkCloudflared(),
               };
+            case 'cloudflared_check':
+              final refresh = args?['refresh'] == true;
+              final info = await CloudflaredService.checkCloudflared(refresh: refresh);
+              return {'ok': true, ...info};
             case 'tunnel_bind':
               final id = args?['tunnelId'] as String?;
               final token = args?['token'] as String?;
@@ -335,7 +341,14 @@ class CloudflareDaemon {
             'ok': true,
             'running': _running,
             'tunnels': _runners.values.map((r) => r.toJson()).toList(),
+            'cloudflared': await CloudflaredService.checkCloudflared(),
           });
+          break;
+
+        case 'cloudflared_check':
+          final refresh = msg['refresh'] == true;
+          final info = await CloudflaredService.checkCloudflared(refresh: refresh);
+          _sendIpc(client, {'ok': true, ...info});
           break;
 
         case 'tunnel_list':

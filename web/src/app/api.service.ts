@@ -1,5 +1,11 @@
 import { Injectable, signal, computed } from '@angular/core';
 
+export interface CloudflaredInfo {
+  installed: boolean;
+  path?: string | null;
+  version?: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private _url = signal(localStorage.getItem('cf_url') || '');
@@ -10,6 +16,7 @@ export class ApiService {
   private _wsMaxRetries = 10;
   private _eventSeq = signal(0);
   readonly eventCount = this._eventSeq.asReadonly();
+  readonly cloudflared = signal<CloudflaredInfo | null>(null);
 
   get configured() { return !!this._url() && !!this._key(); }
   get apiUrl() { return this._url(); }
@@ -19,6 +26,7 @@ export class ApiService {
     this._url.set(url); this._key.set(key);
     localStorage.setItem('cf_url', url); localStorage.setItem('cf_key', key);
     this.startWs();
+    this.checkCloudflared();
   }
 
   setKey(key: string) { this._key.set(key); }
@@ -27,10 +35,29 @@ export class ApiService {
   disconnect() {
     this._ws?.close(); this._ws = null;
     this._url.set(''); this._key.set('');
+    this.cloudflared.set(null);
     localStorage.removeItem('cf_url'); localStorage.removeItem('cf_key');
   }
 
   startWs() { this._startWs(); }
+
+  async checkCloudflared(refresh = false): Promise<CloudflaredInfo> {
+    try {
+      const res = await this.call(`/api/cloudflared${refresh ? '?refresh=true' : ''}`, 'GET');
+      if (res && typeof res.installed === 'boolean') {
+        const info: CloudflaredInfo = {
+          installed: res.installed,
+          path: res.path || null,
+          version: res.version || null,
+        };
+        this.cloudflared.set(info);
+        return info;
+      }
+    } catch {}
+    const fallback: CloudflaredInfo = { installed: false, path: null, version: null };
+    this.cloudflared.set(fallback);
+    return fallback;
+  }
 
   async call(path: string, method = 'GET', data?: any): Promise<any> {
     const base = this._url() || localStorage.getItem('cf_url') || this._baseUrl;
@@ -39,7 +66,11 @@ export class ApiService {
     if (data) headers['Content-Type'] = 'application/json';
     const res = await fetch(url, { method, headers, body: data ? JSON.stringify(data) : undefined });
     if (!res.ok) throw await res.json().catch(() => ({ error: res.statusText }));
-    return res.json();
+    const json = await res.json();
+    if (json && json.cloudflared && typeof json.cloudflared.installed === 'boolean') {
+      this.cloudflared.set(json.cloudflared);
+    }
+    return json;
   }
 
   async callWithKey(key: string, path: string, method = 'GET', data?: any): Promise<any> {
@@ -49,7 +80,11 @@ export class ApiService {
     if (data) headers['Content-Type'] = 'application/json';
     const res = await fetch(url, { method, headers, body: data ? JSON.stringify(data) : undefined });
     if (!res.ok) throw await res.json().catch(() => ({ error: res.statusText }));
-    return res.json();
+    const json = await res.json();
+    if (json && json.cloudflared && typeof json.cloudflared.installed === 'boolean') {
+      this.cloudflared.set(json.cloudflared);
+    }
+    return json;
   }
 
   private _startWs() {

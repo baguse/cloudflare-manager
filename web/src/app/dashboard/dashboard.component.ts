@@ -17,6 +17,18 @@ interface DnsZone { id: string; name: string; }
   template: `
     @if (loading()) { <div class="loading-bar"></div> }
     @if (error()) { <div class="card" style="color:var(--red);text-align:center"><span class="material-icons" style="font-size:20px;vertical-align:middle">error_outline</span> {{error()}} <button class="btn btn-ghost btn-xs" (click)="refreshAll()">Retry</button></div> }
+    @if (api.cloudflared() && !api.cloudflared()?.installed) {
+      <div class="card" style="border-left:4px solid var(--red);background:rgba(248,113,113,0.08);display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <span class="material-icons" style="color:var(--red);font-size:24px">error</span>
+        <div style="flex:1">
+          <b style="color:var(--red);font-size:14px">cloudflared is not installed</b>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">
+            The <code>cloudflared</code> binary was not found on the host system. Tunnels cannot be bound or started until cloudflared is installed.
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-xs" (click)="recheckCloudflared()"><span class="material-icons" style="font-size:14px">refresh</span> Re-check</button>
+      </div>
+    }
     <div class="page-header"><h1>Dashboard</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="refreshAll()"><span class="material-icons" style="font-size:16px">refresh</span></button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
     @if (showBind) {
       <div class="card bind-row"><input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain"><select class="input" [(ngModel)]="bind.zoneId"><option value="">Select domain...</option>
@@ -90,7 +102,7 @@ interface DnsZone { id: string; name: string; }
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
-  private api = inject(ApiService);
+  public api = inject(ApiService);
   private toast = inject(ToastService);
   private modals = inject(ModalService);
   private confirmSvc = inject(ConfirmService);
@@ -122,9 +134,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnInit() { this.refreshAll(); this.destroyRef.onDestroy(() => this._init.destroy()); }
   ngOnDestroy() {}
 
-  async refreshAll() { this.loading.set(true); this.error.set(''); try { await this.refreshTunnels(); await this._loadZones(); } catch {} finally { this.loading.set(false); } }
+  async refreshAll() { this.loading.set(true); this.error.set(''); try { await this.refreshTunnels(); await this._loadZones(); await this.api.checkCloudflared(); } catch {} finally { this.loading.set(false); } }
   async refreshTunnels() { try { const r = await this.api.call('/api/tunnels/all'); this.tunnels.set(r.tunnels||[]); } catch(e:any) { this.error.set(e.error||'Connection failed'); this.tunnels.set([]); }}
   async _loadZones() { try { const r = await this.api.call('/api/zones'); this.zones.set(r.zones||[]); } catch {} }
+
+  async recheckCloudflared() {
+    this.toast.show('Checking cloudflared...');
+    const res = await this.api.checkCloudflared(true);
+    if (res.installed) {
+      this.toast.show('cloudflared detected: ' + (res.path || 'installed'));
+    } else {
+      this.toast.show('cloudflared is not installed!', true);
+    }
+  }
 
   stateClass(s:string) { return s==='running'?'badge-green':s==='crashed'?'badge-red':s==='starting'?'badge-yellow':s==='inactive'?'badge-gray':'badge-gray'; }
   extractPort(s?:string) { if(!s)return null; const m=s.match(/:(\d+)$/); return m?+m[1]:null; }
@@ -132,11 +154,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   splitTags(tags?:string): string[] { return (tags||'').split(',').map(t=>t.trim()).filter(t=>t.length>0); }
 
   async quickBind() {
+    if (this.api.cloudflared() && !this.api.cloudflared()?.installed) {
+      return this.toast.show('cloudflared is not installed!', true);
+    }
     const z = this.zones().find(x=>x.id===this.bind.zoneId);
     if(!this.bind.subdomain||!this.bind.zoneId||!this.bind.port||!z) return this.toast.show('All fields required',true);
     this.loading.set(true); try { const r = await this.api.call('/api/bind','POST',{subdomain:this.bind.subdomain,zoneId:this.bind.zoneId,zoneName:z.name,port:+this.bind.port}); this.toast.show('Bound: '+r.url); this.showBind=false; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); }
   }
-  async quickBindExisting(tunnelId:string) { if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST',{port:this.bindPort||undefined}); this.toast.show('Tunnel bound'); this.bindTunnelId=''; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
+  async quickBindExisting(tunnelId:string) {
+    if (this.api.cloudflared() && !this.api.cloudflared()?.installed) {
+      return this.toast.show('cloudflared is not installed!', true);
+    }
+    if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST',{port:this.bindPort||undefined}); this.toast.show('Tunnel bound'); this.bindTunnelId=''; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
   async unbind(id:string) { if(this.actingTunnelId())return; if(!await this.confirmSvc.confirm('Unbind?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id,'DELETE');this.toast.show('Unbound');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
   async deleteTunnel(id:string) { if(this.actingTunnelId())return; if(!await this.confirmSvc.confirm('Delete from Cloudflare?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id+'/delete','POST');this.toast.show('Deleted');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
   async showLogs(id:string) { this.logsModal.set(true); this.logLines.set([]); this.actingTunnelId.set(id); try{const r=await this.api.call('/api/logs/'+id+'?limit=100');this.logLines.set(r.logs||[]);}catch{this.logLines.set(['Error']);}finally{this.actingTunnelId.set('');}}
