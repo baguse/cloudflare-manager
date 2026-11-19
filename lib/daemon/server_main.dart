@@ -158,6 +158,7 @@ Future<void> main(List<String> args) async {
       _printUsage();
       break;
   }
+  exit(0);
 }
 
 Future<void> _showStatus() async {

@@ -47,7 +47,7 @@ class DaemonClient {
   }
 
   void disconnect() {
-    _socket?.close();
+    _socket?.destroy();
     _socket = null;
   }
 

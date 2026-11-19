@@ -91,6 +91,7 @@ void main(List<String> arguments) async {
       _printUsage(parser);
       exit(1);
   }
+  exit(0);
 }
 
 void _printUsage(ArgParser parser) {
