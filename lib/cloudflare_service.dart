@@ -239,8 +239,29 @@ class CloudflareService {
     return null;
   }
 
-  // Create a new Zero Trust Tunnel
-  static Future<Map<String, dynamic>?> createTunnel(String name) async {
+  static String _extractErrorMessage(Map<String, dynamic> data, {int? statusCode}) {
+    final errorList = data['errors'] as List?;
+    if (errorList != null && errorList.isNotEmpty) {
+      final err = errorList.first;
+      final msg = err is Map ? (err['message'] ?? err.toString()) : err.toString();
+      final code = err is Map ? err['code'] : null;
+      if (code == 10000 || msg.toString().toLowerCase().contains('authentication error')) {
+        return 'Cloudflare authentication error (code 10000): Your Cloudflare API Token is missing "Account > Cloudflare Tunnel > Edit" permission. Please add this permission to your API token in Cloudflare Dashboard.';
+      }
+      return 'Cloudflare error ($code): $msg';
+    }
+    final messageList = data['messages'] as List?;
+    if (messageList != null && messageList.isNotEmpty) {
+      return messageList.join(', ');
+    }
+    if (statusCode != null) {
+      return 'Cloudflare returned HTTP $statusCode';
+    }
+    return 'Unknown Cloudflare API error';
+  }
+
+  // Create a new Zero Trust Tunnel with full result details
+  static Future<Map<String, dynamic>> createTunnelResult(String name) async {
     try {
       final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
@@ -258,11 +279,10 @@ class CloudflareService {
         }),
       );
 
+      final data = json.decode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = json.decode(response.body);
         if (data['success'] == true) {
           final tunnelId = data['result']['id'];
-          // Construct the Cloudflare Tunnel Token required for cloudflared
           final tokenData = {
             "a": accountId,
             "t": tunnelId,
@@ -271,19 +291,28 @@ class CloudflareService {
           final runToken = base64Encode(utf8.encode(json.encode(tokenData)));
           
           return {
+            'ok': true,
             'id': tunnelId,
             'token': runToken,
           };
         }
       }
+      return {'ok': false, 'error': _extractErrorMessage(data, statusCode: response.statusCode)};
     } catch (e) {
       print('Error creating tunnel: $e');
+      return {'ok': false, 'error': 'Network or client error: $e'};
     }
+  }
+
+  // Create a new Zero Trust Tunnel (backward compatibility)
+  static Future<Map<String, dynamic>?> createTunnel(String name) async {
+    final res = await createTunnelResult(name);
+    if (res['ok'] == true) return res;
     return null;
   }
 
-  // Create a DNS CNAME record pointing to the tunnel
-  static Future<bool> createTunnelDnsRecord(String zoneId, String subdomain, String tunnelId) async {
+  // Create a DNS CNAME record pointing to the tunnel with full result details
+  static Future<Map<String, dynamic>> createTunnelDnsRecordResult(String zoneId, String subdomain, String tunnelId) async {
     try {
       final headers = await _getHeaders();
       final response = await http.post(
@@ -298,14 +327,23 @@ class CloudflareService {
         }),
       );
       
+      final data = json.decode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = json.decode(response.body);
-        return data['success'] == true;
+        if (data['success'] == true) {
+          return {'ok': true};
+        }
       }
+      return {'ok': false, 'error': _extractErrorMessage(data, statusCode: response.statusCode)};
     } catch (e) {
       print('Error creating DNS record: $e');
+      return {'ok': false, 'error': 'Error creating DNS record: $e'};
     }
-    return false;
+  }
+
+  // Create a DNS CNAME record pointing to the tunnel (backward compatibility)
+  static Future<bool> createTunnelDnsRecord(String zoneId, String subdomain, String tunnelId) async {
+    final res = await createTunnelDnsRecordResult(zoneId, subdomain, tunnelId);
+    return res['ok'] == true;
   }
 
   // Delete a Tunnel
@@ -367,7 +405,7 @@ class CloudflareService {
   }
 
   // Configure Tunnel Remote Ingress
-  static Future<bool> configureTunnel(String tunnelId, String hostname, int localPort) async {
+  static Future<Map<String, dynamic>> configureTunnelResult(String tunnelId, String hostname, int localPort) async {
     try {
       final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
@@ -390,14 +428,22 @@ class CloudflareService {
         }),
       );
       
+      final data = json.decode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = json.decode(response.body);
-        return data['success'] == true;
+        if (data['success'] == true) {
+          return {'ok': true};
+        }
       }
+      return {'ok': false, 'error': _extractErrorMessage(data, statusCode: response.statusCode)};
     } catch (e) {
       print('Error configuring tunnel: $e');
+      return {'ok': false, 'error': 'Error configuring tunnel: $e'};
     }
-    return false;
+  }
+
+  static Future<bool> configureTunnel(String tunnelId, String hostname, int localPort) async {
+    final res = await configureTunnelResult(tunnelId, hostname, localPort);
+    return res['ok'] == true;
   }
 
   static Future<Map<String, int>> fetchTunnelAnalytics(String zoneId, String hostname, {int daysBack = 30}) async {

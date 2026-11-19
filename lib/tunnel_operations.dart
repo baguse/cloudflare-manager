@@ -24,19 +24,19 @@ class TunnelOperations {
     await AppStorage.instance.write(key: CloudflareService.accountIdKey, value: accountId);
 
     // 1. Create tunnel on Cloudflare
-    final tunnelData = await CloudflareService.createTunnel('tunnel-$subdomain-$port');
-    if (tunnelData == null) return {'ok': false, 'error': 'Failed to create tunnel'};
-    final tunnelId = tunnelData['id'] as String;
-    final tunnelToken = tunnelData['token'] as String?;
-    if (tunnelId.isEmpty || tunnelToken == null) return {'ok': false, 'error': 'Invalid tunnel response'};
+    final tunnelRes = await CloudflareService.createTunnelResult('tunnel-$subdomain-$port');
+    if (tunnelRes['ok'] != true) return {'ok': false, 'error': tunnelRes['error'] ?? 'Failed to create tunnel'};
+    final tunnelId = tunnelRes['id'] as String;
+    final tunnelToken = tunnelRes['token'] as String?;
+    if (tunnelId.isEmpty || tunnelToken == null) return {'ok': false, 'error': 'Invalid tunnel response from Cloudflare'};
 
     // 2. Configure ingress
-    final configured = await CloudflareService.configureTunnel(tunnelId, hostname, port);
-    if (!configured) return {'ok': false, 'error': 'Failed to configure tunnel routing'};
+    final configRes = await CloudflareService.configureTunnelResult(tunnelId, hostname, port);
+    if (configRes['ok'] != true) return {'ok': false, 'error': configRes['error'] ?? 'Failed to configure tunnel routing'};
 
     // 3. Create DNS record
-    final dnsOk = await CloudflareService.createTunnelDnsRecord(zoneId, subdomain, tunnelId);
-    if (!dnsOk) return {'ok': false, 'error': 'Failed to create DNS record'};
+    final dnsRes = await CloudflareService.createTunnelDnsRecordResult(zoneId, subdomain, tunnelId);
+    if (dnsRes['ok'] != true) return {'ok': false, 'error': dnsRes['error'] ?? 'Failed to create DNS record'};
 
     // 4. Bind via daemon
     final bindResult = await ipc('tunnel_bind', args: {'tunnelId': tunnelId, 'token': tunnelToken, 'hostname': hostname, 'port': port});
