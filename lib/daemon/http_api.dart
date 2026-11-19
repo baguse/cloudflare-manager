@@ -37,7 +37,20 @@ class HttpApiServer {
       _prefix = apiKey.substring(0, 4);
 
   Future<void> start() async {
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    if (_server != null) return;
+    SocketException? lastError;
+    for (int attempt = 0; attempt < 5; attempt++) {
+      try {
+        _server = await HttpServer.bind(InternetAddress.anyIPv4, port, shared: true);
+        break;
+      } on SocketException catch (e) {
+        lastError = e;
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    }
+    if (_server == null && lastError != null) {
+      throw lastError;
+    }
     print('[api] HTTP API listening on http://0.0.0.0:$port');
     print('[api] Auth key prefix: $_prefix...');
     await WebhookService.instance.loadWebhooks();
@@ -908,10 +921,12 @@ class HttpApiServer {
     final candidates = <String>[
       '$exeDir/web/dist/browser',
       '$exeDir/../web/dist/browser',
+      '$exeDir/../../web/dist/browser',
       '$home/.cloudflared/web/dist/browser',
       '${Directory.current.path}/web/dist/browser',
       '$exeDir/web/dist',
       '$exeDir/../web/dist',
+      '$exeDir/../../web/dist',
       '$home/.cloudflared/web/dist',
       '${Directory.current.path}/web/dist',
     ];
@@ -1059,7 +1074,14 @@ async function submit(){
   const d=await r.json();
   if(!d.ok) throw new Error(d.error||'Unknown error');
   document.getElementById('ok').style.display='block';
-  setTimeout(()=>location.reload(),2000);
+  const newPort = document.getElementById('port').value;
+  setTimeout(()=>{
+    if(newPort && newPort != '$port') {
+      location.port = newPort;
+    } else {
+      location.reload();
+    }
+  }, 1500);
  }catch(e){
   document.getElementById('err').textContent=e.message;document.getElementById('err').style.display='block';
   btn.disabled=false;btn.textContent='Save & Start';
@@ -1083,23 +1105,30 @@ async function submit(){
       _jsonResponse(request.response, 400, {'ok': false, 'error': 'token and accountId required'});
       return;
     }
+    final targetPort = int.tryParse(portStr ?? '') ?? port;
     if (portStr != null) {
       await AppStorage.instance.write(key: 'api_port', value: portStr);
     }
     await AppStorage.instance.write(key: CloudflareService.tokenKey, value: token);
     await AppStorage.instance.write(key: CloudflareService.accountIdKey, value: accountId);
     await AppStorage.instance.write(key: 'api_enabled', value: 'true');
+
+    // Transition immediately out of setupMode so the web dashboard is served
+    setupMode = false;
     _jsonResponse(request.response, 200, {'ok': true});
-    // Restart API server in normal mode after a short delay
-    Future.delayed(const Duration(milliseconds: 500), () async {
-      try {
-        final client = DaemonClient();
-        if (await client.connect()) {
-          await client.send('api_restart');
-          client.disconnect();
-        }
-      } catch (_) {}
-    });
+
+    // If port changed, trigger daemon to restart the HTTP API on the new port
+    if (targetPort != port) {
+      Future.delayed(const Duration(milliseconds: 500), () async {
+        try {
+          final client = DaemonClient();
+          if (await client.connect()) {
+            await client.send('api_restart');
+            client.disconnect();
+          }
+        } catch (_) {}
+      });
+    }
   }
 
   void _serveSwaggerUi(HttpResponse response) {

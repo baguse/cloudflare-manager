@@ -315,12 +315,12 @@ class CloudflareDaemon {
       final accountId = await AppStorage.instance.read(key: CloudflareService.accountIdKey);
       if (token == null || token.isEmpty || accountId == null || accountId.isEmpty) {
         _apiServer!.setupMode = true;
-        _log('[daemon] API in setup mode — visit http://0.0.0.0:$port to configure');
+        print('[daemon] API in setup mode — visit http://0.0.0.0:$port to configure');
       }
       await _apiServer!.start();
-      _log('[daemon] HTTP API started on port $port');
+      print('[daemon] HTTP API started on port $port');
     } catch (e) {
-      _log('[daemon] Failed to start HTTP API: $e');
+      print('[daemon] Failed to start HTTP API: $e');
     }
   }
 
@@ -450,8 +450,11 @@ class CloudflareDaemon {
           break;
 
         case 'api_restart':
-          _apiServer?.stop();
-          _apiServer = null;
+          if (_apiServer != null) {
+            await _apiServer!.stop();
+            _apiServer = null;
+            await Future.delayed(const Duration(milliseconds: 300));
+          }
           await _startApiIfEnabled();
           _sendIpc(client, {'ok': true, 'running': _apiServer != null});
           break;

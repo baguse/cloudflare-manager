@@ -73,6 +73,12 @@ fi
 
 BINARY="$SERVER_BUILD/$NAME"
 echo "  Binary: $BINARY ($(du -h "$BINARY" 2>/dev/null | cut -f1 || echo 'N/A'))"
+
+if [ -d "$PROJECT_DIR/web/dist/browser" ]; then
+  mkdir -p "$SERVER_BUILD/web/dist"
+  cp -r "$PROJECT_DIR/web/dist/browser/"* "$SERVER_BUILD/web/dist/"
+fi
+
 cd "$PROJECT_DIR"
 
 # Create output directory
