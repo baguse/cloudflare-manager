@@ -490,9 +490,12 @@ class HttpApiServer {
       return;
     }
 
+    final serviceEnabled = data['serviceEnabled'] == true;
+
     final result = await TunnelOperations.quickBind(
       token: token, accountId: accountId,
       subdomain: subdomain, zoneId: zoneId, zoneName: zoneName, port: port,
+      serviceEnabled: serviceEnabled,
       ipc: _ipc,
     );
     _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
@@ -836,7 +839,14 @@ class HttpApiServer {
     }
     final dcfg = File('$home/.cloudflared/daemon.json');
     if (await dcfg.exists()) {
-      data['daemon'] = json.decode(await dcfg.readAsString());
+      try {
+        final ddata = json.decode(await dcfg.readAsString());
+        data['daemon'] = ddata;
+        if (ddata is Map) {
+          if (ddata['bootDelaySeconds'] != null) data['boot_delay'] = ddata['bootDelaySeconds'].toString();
+          if (ddata['maxStartRetries'] != null) data['max_retries'] = ddata['maxStartRetries'].toString();
+        }
+      } catch (_) {}
     }
     _jsonResponse(response, 200, {'ok': true, 'settings': data});
   }
@@ -844,6 +854,26 @@ class HttpApiServer {
   Future<void> _handlePatchSettings(HttpRequest request) async {
     final body = await _parseBody(request);
     if (body == null) return;
+    final home = Platform.environment['HOME'] ?? '/tmp';
+
+    // Handle daemon boot config if present
+    if (body.containsKey('daemon') || body.containsKey('boot_delay') || body.containsKey('max_retries') || body.containsKey('bootDelaySeconds') || body.containsKey('maxStartRetries')) {
+      final dfile = File('$home/.cloudflared/daemon.json');
+      Map<String, dynamic> ddata = {};
+      if (await dfile.exists()) {
+        try { ddata = json.decode(await dfile.readAsString()); } catch (_) {}
+      }
+      if (body['daemon'] is Map) {
+        ddata.addAll(Map<String, dynamic>.from(body['daemon']));
+      }
+      final delay = body['bootDelaySeconds'] ?? body['boot_delay'];
+      if (delay != null) ddata['bootDelaySeconds'] = int.tryParse(delay.toString()) ?? ddata['bootDelaySeconds'] ?? 0;
+      final retries = body['maxStartRetries'] ?? body['max_retries'];
+      if (retries != null) ddata['maxStartRetries'] = int.tryParse(retries.toString()) ?? ddata['maxStartRetries'] ?? 3;
+      await dfile.parent.create(recursive: true);
+      await dfile.writeAsString(json.encode(ddata));
+    }
+
     for (final entry in body.entries) {
       final newVal = entry.value?.toString();
       // Guard: do not wipe existing Cloudflare credentials if an empty string is passed
@@ -910,7 +940,9 @@ class HttpApiServer {
     final body = await _parseBody(request);
     if (body == null) return;
     final enabled = body['enabled'] == true;
-    await CloudflaredService.saveServiceEnabled(tunnelId, enabled);
+    final port = body['port'] is int ? body['port'] as int : int.tryParse(body['port']?.toString() ?? '');
+    final hostname = body['hostname'] as String?;
+    await CloudflaredService.saveServiceEnabled(tunnelId, enabled, port: port, hostname: hostname);
     _jsonResponse(request.response, 200, {'ok': true, 'serviceEnabled': enabled});
   }
 

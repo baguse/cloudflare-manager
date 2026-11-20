@@ -17,6 +17,7 @@ export class ApiService {
   private _eventSeq = signal(0);
   readonly eventCount = this._eventSeq.asReadonly();
   readonly cloudflared = signal<CloudflaredInfo | null>(null);
+  readonly daemonRunning = signal<boolean>(true);
 
   get configured() { return !!this._url() && !!this._key(); }
   get apiUrl() { return this._url(); }
@@ -70,6 +71,11 @@ export class ApiService {
     if (json && json.cloudflared && typeof json.cloudflared.installed === 'boolean') {
       this.cloudflared.set(json.cloudflared);
     }
+    if (json && typeof json.daemonRunning === 'boolean') {
+      this.daemonRunning.set(json.daemonRunning);
+    } else if (json && typeof json.running === 'boolean') {
+      this.daemonRunning.set(json.running);
+    }
     return json;
   }
 
@@ -84,7 +90,16 @@ export class ApiService {
     if (json && json.cloudflared && typeof json.cloudflared.installed === 'boolean') {
       this.cloudflared.set(json.cloudflared);
     }
+    if (json && typeof json.daemonRunning === 'boolean') {
+      this.daemonRunning.set(json.daemonRunning);
+    } else if (json && typeof json.running === 'boolean') {
+      this.daemonRunning.set(json.running);
+    }
     return json;
+  }
+
+  async toggleTunnelService(tunnelId: string, enabled: boolean, port?: number, hostname?: string): Promise<any> {
+    return await this.call('/api/tunnels/' + encodeURIComponent(tunnelId) + '/service', 'PUT', { enabled, port, hostname });
   }
 
   private _startWs() {

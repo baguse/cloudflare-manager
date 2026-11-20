@@ -55,6 +55,8 @@ tr:hover td { background: var(--bg); }
 .empty { text-align: center; padding: 32px; color: var(--muted); font-size: 14px; }
 .note-text { font-size: 11px; color: var(--muted); font-style: italic; display: flex; align-items: center; gap: 2px; margin-top: 2px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-chip { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 600; margin: 2px 2px 0 0; vertical-align: middle; border: 1px solid; }
+.service-chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.35); margin-left: 6px; vertical-align: middle; cursor: pointer; user-select: none; }
+.service-chip:hover { background: rgba(74,222,128,0.25); border-color: var(--green); }
 .tag-close { cursor: pointer; opacity: 0.6; font-size: 14px; line-height: 1; margin-left: 2px; }
 .tag-close:hover { opacity: 1; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 4px; }

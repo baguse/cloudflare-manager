@@ -7,7 +7,7 @@ import { ToastService } from '../toast.service';
 import { ConfirmService } from '../confirm.service';
 import * as QRCode from 'qrcode';
 
-interface Tunnel { tunnelId: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; service?:string; }
+interface Tunnel { tunnelId: string; name?: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; service?:string; status?: string; }
 interface DnsZone { id: string; name: string; }
 
 @Component({
@@ -31,9 +31,19 @@ interface DnsZone { id: string; name: string; }
     }
     <div class="page-header"><h1>Dashboard</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="refreshAll()"><span class="material-icons" style="font-size:16px">refresh</span></button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
     @if (showBind) {
-      <div class="card bind-row"><input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain"><select class="input" [(ngModel)]="bind.zoneId"><option value="">Select domain...</option>
-        @for (z of zones(); track z.id) { <option [value]="z.id">{{z.name}}</option> }
-      </select><input class="input" [(ngModel)]="bind.port" placeholder="Port" type="number"><button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button></div>
+      <div class="card bind-row">
+        <input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain">
+        <select class="input" [(ngModel)]="bind.zoneId">
+          <option value="">Select domain...</option>
+          @for (z of zones(); track z.id) { <option [value]="z.id">{{z.name}}</option> }
+        </select>
+        <input class="input" [(ngModel)]="bind.port" placeholder="Port" type="number">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none" title="Automatically start this tunnel on boot with background daemon">
+          <input type="checkbox" [(ngModel)]="bind.serviceEnabled" style="accent-color:var(--accent)">
+          <span>Auto-start on boot</span>
+        </label>
+        <button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button>
+      </div>
     }
     <div class="stats-row"><div class="stat"><span class="stat-num">{{tunnels().length}}</span><span class="stat-label">Tunnels</span></div><div class="stat"><span class="stat-num green">{{runningCount()}}</span><span class="stat-label">Running</span></div><div class="stat"><span class="stat-num red">{{crashedCount()}}</span><span class="stat-label">Crashed</span></div><div class="stat"><span class="stat-num muted">{{stoppedCount()}}</span><span class="stat-label">Inactive</span></div></div>
     <div class="card">
@@ -42,12 +52,17 @@ interface DnsZone { id: string; name: string; }
           @for (t of tunnels(); track t.tunnelId) {
             <tr><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td>
               <td>{{t.hostname||'-'}}
+                @if (t.serviceEnabled) {
+                  <span class="service-chip" title="Auto-start on boot is enabled (click to configure)" (click)="openServiceModal(t)">
+                    <span class="material-icons" style="font-size:12px;vertical-align:middle">shield</span>Auto-start
+                  </span>
+                }
                 @for (tag of splitTags(t.tags); track tag) { <span class="tag-chip" [ngStyle]="getTagStyle(tag)">{{tag}}</span> }
                 @if (t.notes) { <span class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span> }
               </td><td class="muted">{{t.port||extractPort(t.service)||'-'}}</td><td><div class="action-cell">
                 <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">edit_note</span></button>
+                <button class="btn btn-ghost btn-xs" [title]="t.serviceEnabled?'Auto-start enabled (click to configure)':'Auto-start disabled (click to configure)'" (click)="openServiceModal(t)" [style.color]="t.serviceEnabled?'var(--green)':''" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">shield</span></button>
                 @if (t.state!=='inactive') {
-                  <button class="btn btn-ghost btn-xs" title="Auto-start" (click)="toggleService(t.tunnelId,t.hostname)" [style.color]="t.serviceEnabled?'var(--green)':''" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">shield</span></button>
                   <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">content_copy</span></button>
                   <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
                   <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">terminal</span></button>
@@ -93,6 +108,68 @@ interface DnsZone { id: string; name: string; }
       </div></div>
     }
 
+    @if (editingService) {
+      <div class="modal-overlay" (click)="editingService=null"><div class="modal" (click)="$event.stopPropagation()" style="width:440px">
+        <div class="modal-head">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="material-icons" style="font-size:22px;color:var(--accent)">shield</span>
+            <b>Auto-start on Boot</b>
+          </div>
+          <button class="btn btn-ghost btn-sm" (click)="editingService=null"><span class="material-icons" style="font-size:18px">close</span></button>
+        </div>
+
+        <div style="margin-bottom:14px">
+          <div style="font-weight:600;font-size:13px">{{editingService.hostname||editingService.name||editingService.tunnelId}}</div>
+          <div class="mono muted" style="font-size:11px;margin-top:2px">ID: {{editingService.tunnelId}}</div>
+        </div>
+
+        @if (api.daemonRunning()) {
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.25);border-radius:8px;font-size:12px;color:var(--green);margin-bottom:16px">
+            <span class="material-icons" style="font-size:18px;flex-shrink:0;margin-top:1px">check_circle</span>
+            <div>
+              <b>Daemon is running</b>
+              <div style="font-size:11px;opacity:0.9;margin-top:2px">Auto-started tunnels launch automatically when the system boots and whenever the background daemon starts.</div>
+            </div>
+          </div>
+        } @else {
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.25);border-radius:8px;font-size:12px;color:var(--red);margin-bottom:16px">
+            <span class="material-icons" style="font-size:18px;flex-shrink:0;margin-top:1px">error</span>
+            <div>
+              <b>Daemon is stopped</b>
+              <div style="font-size:11px;opacity:0.9;margin-top:2px">The background daemon is currently offline. Start the daemon for auto-start to take effect.</div>
+            </div>
+          </div>
+        }
+
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:16px">
+          <div>
+            <div style="font-weight:600;font-size:14px">Auto-start on boot</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">
+              {{serviceModalEnabled ? 'Tunnel will auto-start with background daemon' : 'Tunnel must be started manually'}}
+            </div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" [(ngModel)]="serviceModalEnabled">
+            <span></span>
+          </label>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <label class="field-label">Target Local Port (required for forwarding traffic)</label>
+          <input class="input" type="number" [(ngModel)]="serviceModalPort" placeholder="e.g. 8080" style="width:100%">
+        </div>
+
+        <p style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.4">
+          Requires the background daemon to be installed (see Settings). Without it, this flag has no effect.
+        </p>
+
+        <div class="bind-row" style="justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" (click)="editingService=null">Cancel</button>
+          <button class="btn btn-primary btn-sm" (click)="saveServiceModal()">Save Configuration</button>
+        </div>
+      </div></div>
+    }
+
     @if (logsModal()) {
       <div class="modal-overlay" (click)="logsModal.set(false)"><div class="modal" (click)="$event.stopPropagation()"><div class="modal-head"><b>Logs</b><button class="btn btn-ghost btn-sm" (click)="logsModal.set(false)"><span class="material-icons" style="font-size:18px">close</span></button></div><div class="log-body">
         @if (logLines().length === 0) { <div class="muted">No logs</div> }
@@ -114,11 +191,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   crashedCount = computed(() => this.tunnels().filter(t=>t.state==='crashed').length);
   stoppedCount = computed(() => this.tunnels().filter(t=>t.state==='stopped'||t.state==='inactive').length);
   zones = signal<DnsZone[]>([]);
-  showBind = false; bind = {subdomain:'',zoneId:'',port:0};
+  showBind = false; bind = {subdomain:'',zoneId:'',port:0,serviceEnabled:false};
   bindPort = 0; bindTunnelId = '';
   logsModal = signal(false); logLines = signal<string[]>([]);
   actingTunnelId = signal('');
   editingNotes: string|null = null; notesText = ''; selectedTags: string[] = []; customTag = '';
+  editingService: Tunnel|null = null; serviceModalEnabled = false; serviceModalPort = 0;
   presetTags = ['prod','staging','dev','api','internal','testing','monitoring','backend','frontend','database','auth','webhook'];
   private _tagColors: Record<string,string> = {
     prod:'#E53935',production:'#E53935',staging:'#FF8F00',dev:'#42A5F5',development:'#42A5F5',
@@ -159,7 +237,48 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     const z = this.zones().find(x=>x.id===this.bind.zoneId);
     if(!this.bind.subdomain||!this.bind.zoneId||!this.bind.port||!z) return this.toast.show('All fields required',true);
-    this.loading.set(true); try { const r = await this.api.call('/api/bind','POST',{subdomain:this.bind.subdomain,zoneId:this.bind.zoneId,zoneName:z.name,port:+this.bind.port}); this.toast.show('Bound: '+r.url); this.showBind=false; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); }
+    this.loading.set(true);
+    try {
+      const r = await this.api.call('/api/bind','POST',{
+        subdomain:this.bind.subdomain,
+        zoneId:this.bind.zoneId,
+        zoneName:z.name,
+        port:+this.bind.port,
+        serviceEnabled:!!this.bind.serviceEnabled,
+      });
+      this.toast.show('Bound: '+r.url + (this.bind.serviceEnabled ? ' (Auto-start enabled)' : ''));
+      this.showBind=false;
+      this.bind = {subdomain:'',zoneId:'',port:0,serviceEnabled:false};
+      this.refreshTunnels();
+    } catch(e:any) {
+      this.toast.show('Bind failed: '+(e.error||e.message),true);
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  openServiceModal(t: Tunnel) {
+    this.editingService = t;
+    this.serviceModalEnabled = !!t.serviceEnabled;
+    this.serviceModalPort = t.port || this.extractPort(t.service) || 0;
+  }
+
+  async saveServiceModal() {
+    if (!this.editingService) return;
+    const tunnel = this.editingService;
+    const enabled = this.serviceModalEnabled;
+    const port = +this.serviceModalPort || undefined;
+    this.loading.set(true);
+    try {
+      await this.api.toggleTunnelService(tunnel.tunnelId, enabled, port, tunnel.hostname);
+      this.toast.show(enabled ? `Auto-start enabled for ${tunnel.hostname || tunnel.tunnelId}` : `Auto-start disabled for ${tunnel.hostname || tunnel.tunnelId}`);
+      this.editingService = null;
+      this.refreshTunnels();
+    } catch {
+      this.toast.show('Failed to update auto-start configuration', true);
+    } finally {
+      this.loading.set(false);
+    }
   }
   async quickBindExisting(tunnelId:string) {
     if (this.api.cloudflared() && !this.api.cloudflared()?.installed) {

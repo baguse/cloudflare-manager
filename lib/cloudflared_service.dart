@@ -284,7 +284,13 @@ class CloudflaredService {
     return {};
   }
 
-  static Future<void> registerAppTunnel(String tunnelId, int localPort, {String? token, String? hostname}) async {
+  static Future<void> registerAppTunnel(
+    String tunnelId,
+    int localPort, {
+    String? token,
+    String? hostname,
+    bool? serviceEnabled,
+  }) async {
     if (token != null) {
       await writeCredentialsFile(token);
     }
@@ -304,7 +310,8 @@ class CloudflaredService {
         if (hostname != null) 'hostname': hostname else if (existingHostname != null) 'hostname': existingHostname,
         if (existingNotes != null) 'notes': existingNotes,
         if (existingTags != null) 'tags': existingTags,
-        if (existingServiceEnabled != null) 'serviceEnabled': existingServiceEnabled,
+        if (serviceEnabled != null) 'serviceEnabled': serviceEnabled
+        else if (existingServiceEnabled != null) 'serviceEnabled': existingServiceEnabled,
       };
       await file.parent.create(recursive: true);
       await file.writeAsString(json.encode(map));
@@ -391,7 +398,12 @@ class CloudflaredService {
     }
   }
 
-  static Future<void> saveServiceEnabled(String tunnelId, bool enabled) async {
+  static Future<void> saveServiceEnabled(
+    String tunnelId,
+    bool enabled, {
+    int? port,
+    String? hostname,
+  }) async {
     final file = _appTunnelMapFile();
     if (file == null) return;
     try {
@@ -401,6 +413,8 @@ class CloudflaredService {
       final existing = map[tunnelId];
       map[tunnelId] = {
         if (existing is Map) ...existing,
+        if (port != null && port > 0) 'port': port,
+        if (hostname != null && hostname.isNotEmpty) 'hostname': hostname,
         'serviceEnabled': enabled,
       };
       await file.parent.create(recursive: true);

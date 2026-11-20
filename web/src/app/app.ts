@@ -36,6 +36,10 @@ import { ConfirmService } from './confirm.service';
           <button class="theme-btn" (click)="toggleTheme()"><span class="material-icons" style="font-size:16px">{{theme()==='dark'?'dark_mode':'light_mode'}}</span></button>
           <button class="theme-btn" (click)="logout()" title="Logout" style="color:var(--red)"><span class="material-icons" style="font-size:16px">logout</span></button>
           <div class="sidebar-status"><span [class]="'dot '+connDot()"></span>@if (!sidebarCollapsed()) { {{connLabel()}} }</div>
+          <div class="sidebar-status" [title]="api.daemonRunning() ? 'Background daemon is running' : 'Background daemon is stopped'">
+            <span [class]="'dot ' + (api.daemonRunning() ? 'dot-green' : 'dot-red')"></span>
+            @if (!sidebarCollapsed()) { <span [style.color]="api.daemonRunning() ? 'var(--text)' : 'var(--muted)'" style="font-size:12px">Daemon: {{api.daemonRunning() ? 'Running' : 'Stopped'}}</span> }
+          </div>
           @if (api.cloudflared(); as cf) {
             @if (!sidebarCollapsed()) {
               <div class="sidebar-status" [style.color]="cf.installed ? 'var(--green)' : 'var(--red)'" [title]="cf.installed ? (cf.path + (cf.version ? ' (' + cf.version + ')' : '')) : 'cloudflared binary not found on host'">

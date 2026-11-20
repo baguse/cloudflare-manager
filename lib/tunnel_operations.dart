@@ -15,6 +15,7 @@ class TunnelOperations {
     required String zoneId,
     required String zoneName,
     required int port,
+    bool serviceEnabled = false,
     required IpcCall ipc,
   }) async {
     final hostname = '$subdomain.$zoneName';
@@ -43,7 +44,13 @@ class TunnelOperations {
     if (bindResult['ok'] != true) return {'ok': false, 'error': 'Tunnel created but daemon bind failed: ${bindResult['error']}'};
 
     // 5. Register locally
-    await CloudflaredService.registerAppTunnel(tunnelId, port, token: tunnelToken, hostname: hostname);
+    await CloudflaredService.registerAppTunnel(
+      tunnelId,
+      port,
+      token: tunnelToken,
+      hostname: hostname,
+      serviceEnabled: serviceEnabled,
+    );
 
     // 6. Fire webhook
     WebhookService.instance.triggerWebhooks(
