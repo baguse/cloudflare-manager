@@ -156,7 +156,7 @@ class HttpApiServer {
     }
 
     // Serve web dashboard at /
-    if (method == 'GET' && (routePath == '/' || routePath == '/index.html')) {
+    if ((method == 'GET' || method == 'HEAD') && (routePath == '/' || routePath == '/index.html')) {
       await _serveWebDashboard(request.response);
       return;
     }
@@ -411,21 +411,36 @@ class HttpApiServer {
     for (final d in daemonTunnels) {
       final id = d['tunnelId'] as String? ?? '';
       seen.add(id);
-      all.add({...d, 'source': 'daemon'});
+      final cfg = cfConfigs[id] ?? <String,String>{};
+      final serviceStr = cfg['service'] ?? d['service'] ?? '';
+      final proto = serviceStr.contains('://')
+          ? serviceStr.substring(0, serviceStr.indexOf('://')).toLowerCase()
+          : ((d['port'] == 22 || d['port'] == 2222) ? 'ssh' : 'http');
+      all.add({
+        ...d,
+        'source': 'daemon',
+        if (serviceStr.isNotEmpty) 'service': serviceStr,
+        'protocol': proto,
+      });
     }
     for (final t in cfTunnels) {
       final id = t['id'] as String? ?? '';
       if (seen.contains(id)) continue;
       final cfg = cfConfigs[id] ?? <String,String>{};
+      final serviceStr = cfg['service'] ?? '';
+      final proto = serviceStr.contains('://')
+          ? serviceStr.substring(0, serviceStr.indexOf('://')).toLowerCase()
+          : 'http';
       all.add({
         'tunnelId': id,
         'name': t['name'] ?? '',
         'hostname': cfg['hostname'] ?? '',
         'port': 0,
+        'protocol': proto,
         'state': 'inactive',
         'source': 'cloudflare',
         'status': t['status'] ?? 'inactive',
-        'service': cfg['service'] ?? '',
+        'service': serviceStr,
       });
     }
 
@@ -445,10 +460,12 @@ class HttpApiServer {
       _jsonResponse(request.response, 400, {'ok': false, 'error': 'Invalid JSON body'});
       return;
     }
+    final protocol = (data['protocol'] as String?)?.trim().toLowerCase();
     final result = await TunnelOperations.rebind(
       tunnelId: tunnelId,
       port: data['port'] as int?,
       hostname: data['hostname'] as String?,
+      protocol: protocol,
       ipc: _ipc,
     );
     _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
@@ -473,7 +490,7 @@ class HttpApiServer {
   Future<void> _handleQuickBind(HttpRequest request) async {
     final data = await _parseBody(request);
     if (data == null) return;
-    final subdomain = data!['subdomain'] as String?;
+    final subdomain = data['subdomain'] as String?;
     final zoneId = data['zoneId'] as String?;
     final zoneName = data['zoneName'] as String?;
     final port = data['port'] as int?;
@@ -491,10 +508,13 @@ class HttpApiServer {
     }
 
     final serviceEnabled = data['serviceEnabled'] == true;
+    final protocol = (data['protocol'] as String?)?.trim().toLowerCase() ??
+        (port == 22 || port == 2222 ? 'ssh' : (port == 443 || port == 8443 ? 'https' : (port == 3389 ? 'rdp' : 'http')));
 
     final result = await TunnelOperations.quickBind(
       token: token, accountId: accountId,
       subdomain: subdomain, zoneId: zoneId, zoneName: zoneName, port: port,
+      protocol: protocol,
       serviceEnabled: serviceEnabled,
       ipc: _ipc,
     );

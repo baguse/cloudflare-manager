@@ -1069,6 +1069,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
     final String subdomain = result['subdomain'];
     final Map<String, dynamic> zone = result['zone'];
+    final String protocol = result['protocol'] as String? ?? (port == 22 || port == 2222 ? 'ssh' : 'http');
     final String fullDomain = '$subdomain.${zone['name']}';
 
     String? tunnelId;
@@ -1082,6 +1083,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         zoneId: zone['id'],
         zoneName: zone['name'],
         port: port,
+        protocol: protocol,
         ipc: _ipcDaemon,
       );
 
@@ -1110,7 +1112,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         tunnelId: id,
         name: 'tunnel-$subdomain-$port',
         localPort: port,
-        url: 'https://$fullDomain',
+        url: protocol == 'ssh' ? 'ssh://$fullDomain' : 'https://$fullDomain',
         pid: daemonPid,
         logs: ValueNotifier<List<String>>([]),
       );
@@ -1303,7 +1305,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
       _showToast('Tunnel has no hostname configured.', isError: true);
       return;
     }
-    final port = await showDialog<int>(
+    final res = await showDialog<dynamic>(
       context: context,
       builder: (context) => BindPortDialog(
         tunnelConfigs: _tunnelConfigs,
@@ -1311,7 +1313,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         openPorts: _openPorts,
       ),
     );
-    if (port == null) return;
+    if (res == null) return;
+    final int port = res is int ? res : (res['port'] as int);
+    final String protocol = res is Map ? (res['protocol'] as String? ?? 'http') : 'http';
 
     try {
       _showToast('Reconfiguring tunnel...', isInfo: true);
@@ -1324,6 +1328,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
           tunnelId: tunnelId,
           port: port,
           hostname: hostname,
+          protocol: protocol,
           ipc: _ipcDaemon,
         );
         if (bindResult['ok'] != true) throw Exception(bindResult['error'] ?? 'Daemon failed to bind tunnel');
@@ -1349,7 +1354,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         tunnelId: tunnelId,
         name: 'tunnel-$hostname',
         localPort: port,
-        url: 'https://$hostname',
+        url: protocol == 'ssh' ? 'ssh://$hostname' : 'https://$hostname',
         pid: startPid,
         logs: ValueNotifier<List<String>>([]),
       );
@@ -4263,6 +4268,7 @@ class BindPortDialog extends StatefulWidget {
 
 class _BindPortDialogState extends State<BindPortDialog> {
   late int _selectedPort;
+  late String _selectedProtocol;
   final TextEditingController _portController = TextEditingController();
 
   @override
@@ -4273,6 +4279,17 @@ class _BindPortDialogState extends State<BindPortDialog> {
     final match = RegExp(r'localhost:(\d+)').firstMatch(service);
     _selectedPort = match != null ? int.parse(match.group(1)!) : (widget.openPorts.isNotEmpty ? widget.openPorts.first.port : 8080);
     _portController.text = '$_selectedPort';
+    if (service.startsWith('ssh://') || _selectedPort == 22 || _selectedPort == 2222) {
+      _selectedProtocol = 'ssh';
+    } else if (service.startsWith('https://') || _selectedPort == 443 || _selectedPort == 8443) {
+      _selectedProtocol = 'https';
+    } else if (service.startsWith('tcp://')) {
+      _selectedProtocol = 'tcp';
+    } else if (service.startsWith('rdp://') || _selectedPort == 3389) {
+      _selectedProtocol = 'rdp';
+    } else {
+      _selectedProtocol = 'http';
+    }
   }
 
   @override
@@ -4325,6 +4342,13 @@ class _BindPortDialogState extends State<BindPortDialog> {
                     setState(() {
                       _selectedPort = p.port;
                       _portController.text = '${p.port}';
+                      if (_selectedPort == 22 || _selectedPort == 2222) {
+                        _selectedProtocol = 'ssh';
+                      } else if (_selectedPort == 443 || _selectedPort == 8443) {
+                        _selectedProtocol = 'https';
+                      } else if (_selectedPort == 3389) {
+                        _selectedProtocol = 'rdp';
+                      }
                     });
                   },
                 );
@@ -4332,10 +4356,29 @@ class _BindPortDialogState extends State<BindPortDialog> {
             ),
             const SizedBox(height: 12),
           ],
+          DropdownButtonFormField<String>(
+            value: _selectedProtocol,
+            decoration: InputDecoration(
+              labelText: 'Protocol',
+              filled: true,
+              fillColor: _panelBg(context),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+            ),
+            dropdownColor: _cardBg(context),
+            items: const [
+              DropdownMenuItem(value: 'http', child: Text('HTTP (http://)')),
+              DropdownMenuItem(value: 'https', child: Text('HTTPS (https://)')),
+              DropdownMenuItem(value: 'ssh', child: Text('SSH (ssh://)')),
+              DropdownMenuItem(value: 'tcp', child: Text('Raw TCP (tcp://)')),
+              DropdownMenuItem(value: 'rdp', child: Text('RDP (rdp://)')),
+            ],
+            onChanged: (val) => setState(() => _selectedProtocol = val ?? 'http'),
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _portController,
             keyboardType: TextInputType.number,
-               decoration: InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Port',
               filled: true,
               fillColor: _panelBg(context),
@@ -4343,7 +4386,16 @@ class _BindPortDialogState extends State<BindPortDialog> {
             ),
             onChanged: (v) {
               final p = int.tryParse(v);
-              if (p != null) _selectedPort = p;
+              if (p != null) {
+                _selectedPort = p;
+                if (_selectedPort == 22 || _selectedPort == 2222) {
+                  setState(() => _selectedProtocol = 'ssh');
+                } else if (_selectedPort == 443 || _selectedPort == 8443) {
+                  setState(() => _selectedProtocol = 'https');
+                } else if (_selectedPort == 3389) {
+                  setState(() => _selectedProtocol = 'rdp');
+                }
+              }
             },
           ),
         ],
@@ -4357,7 +4409,7 @@ class _BindPortDialogState extends State<BindPortDialog> {
           onPressed: () {
             final p = int.tryParse(_portController.text.trim());
             if (p == null || p <= 0 || p > 65535) return;
-            Navigator.pop(context, p);
+            Navigator.pop(context, {'port': p, 'protocol': _selectedProtocol});
           },
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFFF6821F),
@@ -4375,11 +4427,20 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
   final _subdomainController = TextEditingController();
   List<Map<String, dynamic>> _zones = [];
   Map<String, dynamic>? _selectedZone;
+  String _selectedProtocol = 'http';
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    final p = widget.localPort;
+    if (p == 22 || p == 2222) {
+      _selectedProtocol = 'ssh';
+    } else if (p == 443 || p == 8443) {
+      _selectedProtocol = 'https';
+    } else if (p == 3389) {
+      _selectedProtocol = 'rdp';
+    }
     _fetchZones();
   }
 
@@ -4406,6 +4467,32 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
                 if (_zones.isEmpty)
                   const Text('No domains found in your Cloudflare account. Please add a site first.', style: TextStyle(color: Colors.redAccent))
                 else ...[
+                  DropdownButtonFormField<String>(
+                    value: _selectedProtocol,
+                    decoration: InputDecoration(
+                      labelText: 'Service Protocol',
+                      filled: true,
+                      fillColor: _panelBg(context),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    ),
+                    dropdownColor: _cardBg(context),
+                    items: const [
+                      DropdownMenuItem(value: 'http', child: Text('HTTP (http://)')),
+                      DropdownMenuItem(value: 'https', child: Text('HTTPS (https://)')),
+                      DropdownMenuItem(value: 'ssh', child: Text('SSH (ssh://)')),
+                      DropdownMenuItem(value: 'tcp', child: Text('Raw TCP (tcp://)')),
+                      DropdownMenuItem(value: 'rdp', child: Text('RDP (rdp://)')),
+                    ],
+                    onChanged: (val) => setState(() => _selectedProtocol = val ?? 'http'),
+                  ),
+                  if (_selectedProtocol == 'ssh') ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      '💡 SSH via Cloudflare Tunnel: Connect via "cloudflared access ssh" or Cloudflare Access web browser terminal.',
+                      style: TextStyle(color: Color(0xFFF6821F), fontSize: 11),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
                   TextField(
                     controller: _subdomainController,
                     decoration: InputDecoration(
@@ -4446,7 +4533,7 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
             onPressed: () {
               final sub = _subdomainController.text.trim();
               if (sub.isEmpty || _selectedZone == null) return;
-              Navigator.pop(context, {'subdomain': sub, 'zone': _selectedZone});
+              Navigator.pop(context, {'subdomain': sub, 'zone': _selectedZone, 'protocol': _selectedProtocol});
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFF6821F),

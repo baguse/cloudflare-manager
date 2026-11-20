@@ -289,6 +289,7 @@ class CloudflaredService {
     int localPort, {
     String? token,
     String? hostname,
+    String? protocol,
     bool? serviceEnabled,
   }) async {
     if (token != null) {
@@ -304,9 +305,11 @@ class CloudflaredService {
       final String? existingNotes = existing is Map ? existing['notes'] as String? : null;
       final String? existingTags = existing is Map ? existing['tags'] as String? : null;
       final String? existingHostname = existing is Map ? existing['hostname'] as String? : null;
+      final String? existingProtocol = existing is Map ? existing['protocol'] as String? : null;
       final existingServiceEnabled = existing is Map ? existing['serviceEnabled'] : null;
       map[tunnelId] = {
         'port': localPort,
+        if (protocol != null) 'protocol': protocol else if (existingProtocol != null) 'protocol': existingProtocol,
         if (hostname != null) 'hostname': hostname else if (existingHostname != null) 'hostname': existingHostname,
         if (existingNotes != null) 'notes': existingNotes,
         if (existingTags != null) 'tags': existingTags,
@@ -395,6 +398,21 @@ class CloudflaredService {
       if (n?.notes != null) t['notes'] = n!.notes;
       if (n?.tags != null) t['tags'] = n!.tags;
       t['serviceEnabled'] = n?.serviceEnabled == true;
+      final s = t['service'] as String?;
+      if (s != null && s.contains('://')) {
+        t['protocol'] = s.substring(0, s.indexOf('://')).toLowerCase();
+      } else {
+        final p = (t['port'] as int?) ?? 0;
+        if (p == 22 || p == 2222) {
+          t['protocol'] = 'ssh';
+        } else if (p == 443 || p == 8443) {
+          t['protocol'] = 'https';
+        } else if (p == 3389) {
+          t['protocol'] = 'rdp';
+        } else {
+          t['protocol'] = 'http';
+        }
+      }
     }
   }
 

@@ -57,6 +57,12 @@ tr:hover td { background: var(--bg); }
 .tag-chip { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 600; margin: 2px 2px 0 0; vertical-align: middle; border: 1px solid; }
 .service-chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.35); margin-left: 6px; vertical-align: middle; cursor: pointer; user-select: none; }
 .service-chip:hover { background: rgba(74,222,128,0.25); border-color: var(--green); }
+.proto-badge { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; font-family: monospace; }
+.proto-http { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+.proto-https { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+.proto-ssh { background: rgba(246, 130, 31, 0.15); color: #F6821F; border: 1px solid rgba(246, 130, 31, 0.3); }
+.proto-tcp { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.proto-rdp { background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
 .tag-close { cursor: pointer; opacity: 0.6; font-size: 14px; line-height: 1; margin-left: 2px; }
 .tag-close:hover { opacity: 1; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 4px; }

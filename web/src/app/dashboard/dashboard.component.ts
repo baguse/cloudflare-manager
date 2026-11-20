@@ -7,7 +7,7 @@ import { ToastService } from '../toast.service';
 import { ConfirmService } from '../confirm.service';
 import * as QRCode from 'qrcode';
 
-interface Tunnel { tunnelId: string; name?: string; state: string; hostname: string; port: number; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; service?:string; status?: string; }
+interface Tunnel { tunnelId: string; name?: string; state: string; hostname: string; port: number; protocol?: string; restartCount: number; notes?:string; tags?:string; serviceEnabled?:boolean; service?:string; status?: string; }
 interface DnsZone { id: string; name: string; }
 
 @Component({
@@ -32,23 +32,36 @@ interface DnsZone { id: string; name: string; }
     <div class="page-header"><h1>Dashboard</h1><div class="actions"><button class="btn btn-ghost btn-sm" (click)="refreshAll()"><span class="material-icons" style="font-size:16px">refresh</span></button><button class="btn btn-primary btn-sm" (click)="showBind=true">+ Quick Bind</button></div></div>
     @if (showBind) {
       <div class="card bind-row">
-        <input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain">
-        <select class="input" [(ngModel)]="bind.zoneId">
+        <select class="input" [(ngModel)]="bind.protocol" style="width:105px;font-weight:600">
+          <option value="http">http://</option>
+          <option value="https">https://</option>
+          <option value="ssh">ssh://</option>
+          <option value="tcp">tcp://</option>
+          <option value="rdp">rdp://</option>
+        </select>
+        <input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain" style="flex:1;min-width:140px">
+        <select class="input" [(ngModel)]="bind.zoneId" style="flex:1;min-width:160px">
           <option value="">Select domain...</option>
           @for (z of zones(); track z.id) { <option [value]="z.id">{{z.name}}</option> }
         </select>
-        <input class="input" [(ngModel)]="bind.port" placeholder="Port" type="number">
+        <input class="input" [(ngModel)]="bind.port" (ngModelChange)="onPortChange($event)" placeholder="Port" type="number" style="width:90px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none" title="Automatically start this tunnel on boot with background daemon">
           <input type="checkbox" [(ngModel)]="bind.serviceEnabled" style="accent-color:var(--accent)">
-          <span>Auto-start on boot</span>
+          <span>Auto-start</span>
         </label>
         <button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button>
       </div>
+      @if (bind.protocol === 'ssh') {
+        <div style="font-size:11px;color:var(--accent);margin:-4px 0 12px 6px;display:flex;align-items:center;gap:4px">
+          <span class="material-icons" style="font-size:14px">info</span>
+          SSH tunnel will route traffic to <code>ssh://localhost:{{bind.port||22}}</code>. Connect using <code>cloudflared access ssh</code> or Cloudflare Access browser terminal.
+        </div>
+      }
     }
     <div class="stats-row"><div class="stat"><span class="stat-num">{{tunnels().length}}</span><span class="stat-label">Tunnels</span></div><div class="stat"><span class="stat-num green">{{runningCount()}}</span><span class="stat-label">Running</span></div><div class="stat"><span class="stat-num red">{{crashedCount()}}</span><span class="stat-label">Crashed</span></div><div class="stat"><span class="stat-num muted">{{stoppedCount()}}</span><span class="stat-label">Inactive</span></div></div>
     <div class="card">
       @if (tunnels().length > 0) {
-        <table><thead><tr><th>Status</th><th>Hostname</th><th>Port</th><th>Actions</th></tr></thead><tbody>
+        <table><thead><tr><th>Status</th><th>Hostname</th><th>Protocol / Port</th><th>Actions</th></tr></thead><tbody>
           @for (t of tunnels(); track t.tunnelId) {
             <tr><td><span class="badge" [ngClass]="stateClass(t.state)">{{t.state}}</span></td>
               <td>{{t.hostname||'-'}}
@@ -59,21 +72,34 @@ interface DnsZone { id: string; name: string; }
                 }
                 @for (tag of splitTags(t.tags); track tag) { <span class="tag-chip" [ngStyle]="getTagStyle(tag)">{{tag}}</span> }
                 @if (t.notes) { <span class="note-text" title="{{t.notes}}"><span class="material-icons" style="font-size:12px;color:var(--accent);vertical-align:middle">sticky_note_2</span>{{t.notes}}</span> }
-              </td><td class="muted">{{t.port||extractPort(t.service)||'-'}}</td><td><div class="action-cell">
+              </td><td class="muted">
+                <span class="proto-badge" [ngClass]="'proto-' + getProto(t)">{{getProto(t).toUpperCase()}}</span>
+                <span style="margin-left:6px">{{t.port||extractPort(t.service)||'-'}}</span>
+              </td><td><div class="action-cell">
                 <button class="btn btn-ghost btn-xs" title="Notes" (click)="editingNotes=t.tunnelId;notesText=t.notes||'';selectedTags=splitTags(t.tags)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">edit_note</span></button>
                 <button class="btn btn-ghost btn-xs" [title]="t.serviceEnabled?'Auto-start enabled (click to configure)':'Auto-start disabled (click to configure)'" (click)="openServiceModal(t)" [style.color]="t.serviceEnabled?'var(--green)':''" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">shield</span></button>
                 @if (t.state!=='inactive') {
-                  <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">content_copy</span></button>
-                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
-                  <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">terminal</span></button>
+                  @if (getProto(t) === 'ssh') {
+                    <button class="btn btn-ghost btn-xs" title="Copy SSH command" (click)="copySsh(t.hostname)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">terminal</span></button>
+                  }
+                  <button class="btn btn-ghost btn-xs" title="Copy URL" (click)="copyUrl(tunnelUrl(t))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">content_copy</span></button>
+                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr(tunnelUrl(t))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                  <button class="btn btn-ghost btn-xs" title="Logs" (click)="showLogs(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">article</span></button>
                   <button class="btn btn-ghost btn-xs" title="Stop" (click)="unbind(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">stop_circle</span></button>
                 } @else {
-                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr('https://'+(t.hostname||''))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
+                  <button class="btn btn-ghost btn-xs" title="QR Code" (click)="showQr(tunnelUrl(t))" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">qr_code</span></button>
                   @if (bindTunnelId===t.tunnelId) {
+                    <select class="input" [(ngModel)]="bindProtocol" style="width:75px;padding:2px 4px;font-size:11px">
+                      <option value="http">http</option>
+                      <option value="https">https</option>
+                      <option value="ssh">ssh</option>
+                      <option value="tcp">tcp</option>
+                      <option value="rdp">rdp</option>
+                    </select>
                     <input class="input" type="number" [(ngModel)]="bindPort" placeholder="Port" style="width:60px;padding:2px 6px;font-size:11px" (keyup.enter)="quickBindExisting(t.tunnelId)">
                     <button class="btn btn-primary btn-xs" (click)="quickBindExisting(t.tunnelId)">Go</button>
                   } @else {
-                    <button class="btn btn-primary btn-xs" (click)="bindTunnelId=t.tunnelId;bindPort=extractPort(t.service)||0" [disabled]="actingTunnelId()==t.tunnelId">Bind</button>
+                    <button class="btn btn-primary btn-xs" (click)="startBindExisting(t)" [disabled]="actingTunnelId()==t.tunnelId">Bind</button>
                   }
                 }
                 <button class="btn btn-ghost btn-xs danger" title="Delete" (click)="deleteTunnel(t.tunnelId)" [disabled]="actingTunnelId()==t.tunnelId"><span class="material-icons" style="font-size:16px">delete_outline</span></button>
@@ -191,8 +217,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   crashedCount = computed(() => this.tunnels().filter(t=>t.state==='crashed').length);
   stoppedCount = computed(() => this.tunnels().filter(t=>t.state==='stopped'||t.state==='inactive').length);
   zones = signal<DnsZone[]>([]);
-  showBind = false; bind = {subdomain:'',zoneId:'',port:0,serviceEnabled:false};
-  bindPort = 0; bindTunnelId = '';
+  showBind = false; bind = {subdomain:'',zoneId:'',port:0,protocol:'http',serviceEnabled:false};
+  bindPort = 0; bindProtocol = 'http'; bindTunnelId = '';
   logsModal = signal(false); logLines = signal<string[]>([]);
   actingTunnelId = signal('');
   editingNotes: string|null = null; notesText = ''; selectedTags: string[] = []; customTag = '';
@@ -231,6 +257,57 @@ export class DashboardComponent implements OnInit, OnDestroy {
   getTagStyle(tag:string) { const c = this._tagColors[tag.toLowerCase()] || '#6366F1'; return {'background': c+'26', 'color': c, 'border-color': c+'66'}; }
   splitTags(tags?:string): string[] { return (tags||'').split(',').map(t=>t.trim()).filter(t=>t.length>0); }
 
+  onPortChange(val: any) {
+    const p = +val;
+    if (p === 22 || p === 2222) {
+      this.bind.protocol = 'ssh';
+    } else if (p === 443 || p === 8443) {
+      this.bind.protocol = 'https';
+    } else if (p === 3389) {
+      this.bind.protocol = 'rdp';
+    }
+  }
+
+  getProto(t: Tunnel): string {
+    if (t.protocol) return t.protocol.toLowerCase();
+    if (t.service) {
+      const idx = t.service.indexOf('://');
+      if (idx !== -1) return t.service.substring(0, idx).toLowerCase();
+    }
+    const p = t.port || this.extractPort(t.service);
+    if (p === 22 || p === 2222) return 'ssh';
+    if (p === 443 || p === 8443) return 'https';
+    if (p === 3389) return 'rdp';
+    return 'http';
+  }
+
+  tunnelUrl(t: Tunnel): string {
+    const proto = this.getProto(t);
+    const host = t.hostname || '';
+    if (!host) return '';
+    if (proto === 'ssh') return 'ssh://' + host;
+    if (proto === 'rdp') return 'rdp://' + host;
+    if (proto === 'tcp') return 'tcp://' + host;
+    return 'https://' + host;
+  }
+
+  async copySsh(hostname?: string) {
+    if (!hostname) return;
+    const cmd = `ssh ${hostname}`;
+    try {
+      await navigator.clipboard.writeText(cmd);
+      this.toast.show(`Copied: ${cmd} (ensure ~/.ssh/config has ProxyCommand cloudflared)`);
+    } catch {
+      this.toast.show('Copy failed', true);
+    }
+  }
+
+  startBindExisting(t: Tunnel) {
+    this.bindTunnelId = t.tunnelId;
+    this.bindPort = t.port || this.extractPort(t.service) || 0;
+    this.bindProtocol = this.getProto(t);
+  }
+
   async quickBind() {
     if (this.api.cloudflared() && !this.api.cloudflared()?.installed) {
       return this.toast.show('cloudflared is not installed!', true);
@@ -244,11 +321,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         zoneId:this.bind.zoneId,
         zoneName:z.name,
         port:+this.bind.port,
+        protocol:this.bind.protocol || 'http',
         serviceEnabled:!!this.bind.serviceEnabled,
       });
       this.toast.show('Bound: '+r.url + (this.bind.serviceEnabled ? ' (Auto-start enabled)' : ''));
       this.showBind=false;
-      this.bind = {subdomain:'',zoneId:'',port:0,serviceEnabled:false};
+      this.bind = {subdomain:'',zoneId:'',port:0,protocol:'http',serviceEnabled:false};
       this.refreshTunnels();
     } catch(e:any) {
       this.toast.show('Bind failed: '+(e.error||e.message),true);
@@ -284,7 +362,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (this.api.cloudflared() && !this.api.cloudflared()?.installed) {
       return this.toast.show('cloudflared is not installed!', true);
     }
-    if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST',{port:this.bindPort||undefined}); this.toast.show('Tunnel bound'); this.bindTunnelId=''; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
+    if(this.actingTunnelId())return; this.actingTunnelId.set(tunnelId); this.loading.set(true); try { await this.api.call('/api/tunnels/'+tunnelId+'/bind','POST',{port:this.bindPort||undefined,protocol:this.bindProtocol||'http'}); this.toast.show('Tunnel bound'); this.bindTunnelId=''; this.refreshTunnels(); } catch(e:any) { this.toast.show('Bind failed: '+(e.error||e.message),true); } finally { this.loading.set(false); this.actingTunnelId.set(''); }}
   async unbind(id:string) { if(this.actingTunnelId())return; if(!await this.confirmSvc.confirm('Unbind?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id,'DELETE');this.toast.show('Unbound');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
   async deleteTunnel(id:string) { if(this.actingTunnelId())return; if(!await this.confirmSvc.confirm('Delete from Cloudflare?'))return; this.actingTunnelId.set(id); try{await this.api.call('/api/tunnels/'+id+'/delete','POST');this.toast.show('Deleted');this.refreshTunnels();}catch{this.toast.show('Error',true);}finally{this.actingTunnelId.set('');}}
   async showLogs(id:string) { this.logsModal.set(true); this.logLines.set([]); this.actingTunnelId.set(id); try{const r=await this.api.call('/api/logs/'+id+'?limit=100');this.logLines.set(r.logs||[]);}catch{this.logLines.set(['Error']);}finally{this.actingTunnelId.set('');}}

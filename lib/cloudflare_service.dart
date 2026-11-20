@@ -470,11 +470,18 @@ class CloudflareService {
   }
 
   // Configure Tunnel Remote Ingress
-  static Future<Map<String, dynamic>> configureTunnelResult(String tunnelId, String hostname, int localPort) async {
+  static Future<Map<String, dynamic>> configureTunnelResult(
+    String tunnelId,
+    String hostname,
+    int localPort, {
+    String protocol = 'http',
+  }) async {
     try {
       final accountId = await AppStorage.instance.read(key: accountIdKey);
       final headers = await _getHeaders();
       
+      final proto = protocol.toLowerCase().trim().replaceAll('://', '');
+      final serviceUrl = '$proto://localhost:$localPort';
       final response = await http.put(
         Uri.parse('$baseUrl/accounts/$accountId/cfd_tunnel/$tunnelId/configurations'),
         headers: headers,
@@ -483,7 +490,8 @@ class CloudflareService {
             'ingress': [
               {
                 'hostname': hostname,
-                'service': 'http://localhost:$localPort'
+                'service': serviceUrl,
+                if (proto == 'https') 'originRequest': {'noTLSVerify': true},
               },
               {
                 'service': 'http_status:404'
@@ -506,8 +514,8 @@ class CloudflareService {
     }
   }
 
-  static Future<bool> configureTunnel(String tunnelId, String hostname, int localPort) async {
-    final res = await configureTunnelResult(tunnelId, hostname, localPort);
+  static Future<bool> configureTunnel(String tunnelId, String hostname, int localPort, {String protocol = 'http'}) async {
+    final res = await configureTunnelResult(tunnelId, hostname, localPort, protocol: protocol);
     return res['ok'] == true;
   }
 
