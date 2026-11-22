@@ -39,7 +39,7 @@ interface DnsZone { id: string; name: string; }
           <option value="tcp">tcp://</option>
           <option value="rdp">rdp://</option>
         </select>
-        <input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain" style="flex:1;min-width:140px">
+        <input class="input" [(ngModel)]="bind.subdomain" placeholder="Subdomain (empty for root)" style="flex:1;min-width:140px">
         <select class="input" [(ngModel)]="bind.zoneId" style="flex:1;min-width:160px">
           <option value="">Select domain...</option>
           @for (z of zones(); track z.id) { <option [value]="z.id">{{z.name}}</option> }
@@ -51,6 +51,12 @@ interface DnsZone { id: string; name: string; }
         </label>
         <button class="btn btn-primary btn-sm" (click)="quickBind()">Bind</button>
       </div>
+      @if (bind.zoneId && (!bind.subdomain || bind.subdomain === '@')) {
+        <div style="font-size:11px;color:var(--accent);margin:-4px 0 12px 6px;display:flex;align-items:center;gap:4px">
+          <span class="material-icons" style="font-size:14px">language</span>
+          Target: Main domain (<code>{{getZoneName(bind.zoneId)}}</code>). Subdomain is empty.
+        </div>
+      }
       @if (bind.protocol === 'ssh') {
         <div style="font-size:11px;color:var(--accent);margin:-4px 0 12px 6px;display:flex;align-items:center;gap:4px">
           <span class="material-icons" style="font-size:14px">info</span>
@@ -302,6 +308,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
+  getZoneName(zoneId: string): string {
+    return this.zones().find(z => z.id === zoneId)?.name || '';
+  }
+
   startBindExisting(t: Tunnel) {
     this.bindTunnelId = t.tunnelId;
     this.bindPort = t.port || this.extractPort(t.service) || 0;
@@ -313,16 +323,41 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return this.toast.show('cloudflared is not installed!', true);
     }
     const z = this.zones().find(x=>x.id===this.bind.zoneId);
-    if(!this.bind.subdomain||!this.bind.zoneId||!this.bind.port||!z) return this.toast.show('All fields required',true);
+    if(!this.bind.zoneId||!this.bind.port||!z) return this.toast.show('Domain and Port are required',true);
+
+    const sub = (this.bind.subdomain || '').trim();
+    const isApex = !sub || sub === '@';
+    let overwrite = false;
+
     this.loading.set(true);
     try {
+      if (isApex) {
+        // Check existence of root domain DNS first
+        try {
+          const check = await this.api.call(`/api/dns/check?zoneId=${z.id}&name=${encodeURIComponent(z.name)}`);
+          if (check.hasConflict) {
+            this.loading.set(false);
+            const summary = (check.conflicts || []).map((c: any) => `${c.type}: ${c.content}`).join(', ');
+            const ok = await this.confirmSvc.confirm(
+              `Root domain "${z.name}" already has existing DNS record(s):\n${summary}\n\nBinding this tunnel will replace the conflicting record(s). Do you want to proceed?`
+            );
+            if (!ok) return;
+            overwrite = true;
+            this.loading.set(true);
+          }
+        } catch (e: any) {
+          console.warn('DNS check failed:', e);
+        }
+      }
+
       const r = await this.api.call('/api/bind','POST',{
-        subdomain:this.bind.subdomain,
-        zoneId:this.bind.zoneId,
-        zoneName:z.name,
-        port:+this.bind.port,
-        protocol:this.bind.protocol || 'http',
-        serviceEnabled:!!this.bind.serviceEnabled,
+        subdomain: sub,
+        zoneId: this.bind.zoneId,
+        zoneName: z.name,
+        port: +this.bind.port,
+        protocol: this.bind.protocol || 'http',
+        serviceEnabled: !!this.bind.serviceEnabled,
+        overwrite: overwrite,
       });
       this.toast.show('Bound: '+r.url + (this.bind.serviceEnabled ? ' (Auto-start enabled)' : ''));
       this.showBind=false;

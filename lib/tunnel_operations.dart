@@ -17,17 +17,39 @@ class TunnelOperations {
     required int port,
     String protocol = 'http',
     bool serviceEnabled = false,
+    bool overwrite = false,
     required IpcCall ipc,
   }) async {
-    final hostname = '$subdomain.$zoneName';
+    final sub = subdomain.trim();
+    final isApex = sub.isEmpty || sub == '@';
+    final hostname = isApex ? zoneName : '$sub.$zoneName';
+    final dnsRecordName = isApex ? zoneName : sub;
+    final tunnelName = isApex ? 'tunnel-root-$port' : 'tunnel-$sub-$port';
     final proto = protocol.toLowerCase().trim().replaceAll('://', '');
 
     // Set credentials for CloudflareService
     await AppStorage.instance.write(key: CloudflareService.tokenKey, value: token);
     await AppStorage.instance.write(key: CloudflareService.accountIdKey, value: accountId);
 
+    // If apex/root domain, check existence of root domain DNS records first
+    if (isApex) {
+      final check = await CloudflareService.checkHostnameDns(zoneId, zoneName);
+      if (check['hasConflict'] == true && !overwrite) {
+        final conflicts = (check['conflicts'] as List)
+            .map((c) => '${c['type']}: ${c['content']}')
+            .join(', ');
+        return {
+          'ok': false,
+          'needsConfirmation': true,
+          'hasConflict': true,
+          'error': 'Root domain $zoneName already has existing DNS record(s) ($conflicts). Overwrite confirmation required.',
+          'conflicts': check['conflicts'],
+        };
+      }
+    }
+
     // 1. Create tunnel on Cloudflare
-    final tunnelRes = await CloudflareService.createTunnelResult('tunnel-$subdomain-$port');
+    final tunnelRes = await CloudflareService.createTunnelResult(tunnelName);
     if (tunnelRes['ok'] != true) return {'ok': false, 'error': tunnelRes['error'] ?? 'Failed to create tunnel'};
     final tunnelId = tunnelRes['id'] as String;
     final tunnelToken = tunnelRes['token'] as String?;
@@ -37,8 +59,8 @@ class TunnelOperations {
     final configRes = await CloudflareService.configureTunnelResult(tunnelId, hostname, port, protocol: proto);
     if (configRes['ok'] != true) return {'ok': false, 'error': configRes['error'] ?? 'Failed to configure tunnel routing'};
 
-    // 3. Create DNS record
-    final dnsRes = await CloudflareService.createTunnelDnsRecordResult(zoneId, subdomain, tunnelId);
+    // 3. Create DNS record (with overwrite if requested)
+    final dnsRes = await CloudflareService.createTunnelDnsRecordResult(zoneId, dnsRecordName, tunnelId, overwrite: overwrite);
     if (dnsRes['ok'] != true) return {'ok': false, 'error': dnsRes['error'] ?? 'Failed to create DNS record'};
 
     // 4. Bind via daemon

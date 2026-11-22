@@ -1067,13 +1067,52 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
     if (result == null) return;
 
-    final String subdomain = result['subdomain'];
+    final String subdomain = (result['subdomain'] as String? ?? '').trim();
     final Map<String, dynamic> zone = result['zone'];
     final String protocol = result['protocol'] as String? ?? (port == 22 || port == 2222 ? 'ssh' : 'http');
-    final String fullDomain = '$subdomain.${zone['name']}';
+    final bool isApex = subdomain.isEmpty || subdomain == '@';
+    final String fullDomain = isApex ? zone['name'] : '$subdomain.${zone['name']}';
 
     String? tunnelId;
     try {
+      bool overwrite = false;
+      if (isApex) {
+        _showToast('Checking root domain ${zone['name']}...', isInfo: true);
+        final check = await CloudflareService.checkHostnameDns(zone['id'], zone['name']);
+        if (check['hasConflict'] == true) {
+          final conflicts = (check['conflicts'] as List)
+              .map((c) => '${c['type']}: ${c['content']}')
+              .join(', ');
+          if (!mounted) return;
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: _cardBg(ctx),
+              title: const Text('Root Domain Conflict', style: TextStyle(fontWeight: FontWeight.bold)),
+              content: Text(
+                'Root domain "${zone['name']}" already has existing DNS record(s):\n\n$conflicts\n\nBinding this tunnel will replace the conflicting record(s). Do you want to proceed?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFF6821F),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Replace & Bind'),
+                ),
+              ],
+            ),
+          );
+          if (confirm != true) return;
+          overwrite = true;
+        }
+      }
+
       _showToast('Creating tunnel...', isInfo: true);
 
       final result = await TunnelOperations.quickBind(
@@ -1084,6 +1123,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
         zoneName: zone['name'],
         port: port,
         protocol: protocol,
+        overwrite: overwrite,
         ipc: _ipcDaemon,
       );
 
@@ -1110,7 +1150,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WindowListener {
 
       final activeTunnel = ActiveTunnel(
         tunnelId: id,
-        name: 'tunnel-$subdomain-$port',
+        name: isApex ? 'tunnel-root-$port' : 'tunnel-$subdomain-$port',
         localPort: port,
         url: protocol == 'ssh' ? 'ssh://$fullDomain' : 'https://$fullDomain',
         pid: daemonPid,
@@ -4496,13 +4536,36 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
                   TextField(
                     controller: _subdomainController,
                     decoration: InputDecoration(
-                      labelText: 'Subdomain (e.g. app)',
+                      labelText: 'Subdomain (leave empty for main domain)',
                       filled: true,
                       fillColor: _panelBg(context),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 6),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _subdomainController,
+                    builder: (context, val, _) {
+                      final text = val.text.trim();
+                      final isApex = text.isEmpty || text == '@';
+                      final zoneName = _selectedZone?['name'] ?? 'Domain';
+                      return Row(
+                        children: [
+                          Icon(Icons.language, size: 14, color: isApex ? const Color(0xFFF6821F) : Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(
+                            isApex ? 'Target: Main domain ($zoneName)' : 'Target: $text.$zoneName',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isApex ? const Color(0xFFF6821F) : Colors.grey,
+                              fontWeight: isApex ? FontWeight.w600 : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
                   DropdownButtonFormField<Map<String, dynamic>>(
                     value: _selectedZone,
                     decoration: InputDecoration(
@@ -4532,7 +4595,7 @@ class _BindDomainDialogState extends State<BindDomainDialog> {
           ElevatedButton(
             onPressed: () {
               final sub = _subdomainController.text.trim();
-              if (sub.isEmpty || _selectedZone == null) return;
+              if (_selectedZone == null) return;
               Navigator.pop(context, {'subdomain': sub, 'zone': _selectedZone, 'protocol': _selectedProtocol});
             },
             style: ElevatedButton.styleFrom(

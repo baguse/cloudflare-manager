@@ -264,6 +264,9 @@ class HttpApiServer {
         case 'GET /zones':
           await _handleZones(request.response);
           break;
+        case 'GET /dns/check':
+          await _handleCheckDns(request);
+          break;
         case 'GET /dns':
           await _handleListDns(request);
           break;
@@ -490,13 +493,14 @@ class HttpApiServer {
   Future<void> _handleQuickBind(HttpRequest request) async {
     final data = await _parseBody(request);
     if (data == null) return;
-    final subdomain = data['subdomain'] as String?;
+    final subdomain = (data['subdomain'] as String?)?.trim() ?? '';
     final zoneId = data['zoneId'] as String?;
     final zoneName = data['zoneName'] as String?;
     final port = data['port'] as int?;
+    final overwrite = data['overwrite'] == true;
 
-    if (subdomain == null || zoneId == null || port == null || zoneName == null) {
-      _jsonResponse(request.response, 400, {'ok': false, 'error': 'subdomain, zoneId, zoneName, and port required'});
+    if (zoneId == null || port == null || zoneName == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'zoneId, zoneName, and port required'});
       return;
     }
 
@@ -516,9 +520,21 @@ class HttpApiServer {
       subdomain: subdomain, zoneId: zoneId, zoneName: zoneName, port: port,
       protocol: protocol,
       serviceEnabled: serviceEnabled,
+      overwrite: overwrite,
       ipc: _ipc,
     );
-    _jsonResponse(request.response, result['ok'] == true ? 200 : 500, result);
+    _jsonResponse(request.response, result['ok'] == true ? 200 : (result['needsConfirmation'] == true ? 409 : 500), result);
+  }
+
+  Future<void> _handleCheckDns(HttpRequest request) async {
+    final zoneId = request.uri.queryParameters['zoneId'];
+    final name = request.uri.queryParameters['name'];
+    if (zoneId == null || name == null) {
+      _jsonResponse(request.response, 400, {'ok': false, 'error': 'zoneId and name required'});
+      return;
+    }
+    final check = await CloudflareService.checkHostnameDns(zoneId, name);
+    _jsonResponse(request.response, 200, {'ok': true, ...check});
   }
 
   // ---- Webhooks CRUD ----

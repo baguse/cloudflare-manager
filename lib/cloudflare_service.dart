@@ -88,6 +88,41 @@ class CloudflareService {
     return [];
   }
 
+  /// List DNS records matching a specific name (FQDN or root domain) in a zone.
+  static Future<List<Map<String, dynamic>>> getDnsRecordsForName(String zoneId, String name) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$baseUrl/zones/$zoneId/dns_records?name=${Uri.encodeComponent(name)}'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true) {
+          return List<Map<String, dynamic>>.from(data['result'] ?? []);
+        }
+      }
+    } catch (e) {
+      print('Error getting DNS records for name $name: $e');
+    }
+    return [];
+  }
+
+  /// Check if root domain or any hostname has existing DNS records, especially conflicting ones (A, AAAA, CNAME).
+  static Future<Map<String, dynamic>> checkHostnameDns(String zoneId, String hostname) async {
+    final records = await getDnsRecordsForName(zoneId, hostname);
+    final conflicts = records.where((r) {
+      final t = (r['type'] as String?)?.toUpperCase();
+      return t == 'A' || t == 'AAAA' || t == 'CNAME';
+    }).toList();
+    return {
+      'exists': records.isNotEmpty,
+      'hasConflict': conflicts.isNotEmpty,
+      'records': records,
+      'conflicts': conflicts,
+    };
+  }
+
   static Future<bool> createDnsRecord(
     String zoneId, {
     required String type,
@@ -365,9 +400,29 @@ class CloudflareService {
   }
 
   // Create a DNS CNAME record pointing to the tunnel with full result details
-  static Future<Map<String, dynamic>> createTunnelDnsRecordResult(String zoneId, String subdomain, String tunnelId) async {
+  static Future<Map<String, dynamic>> createTunnelDnsRecordResult(
+    String zoneId,
+    String subdomain,
+    String tunnelId, {
+    bool overwrite = false,
+  }) async {
     try {
       final headers = await _getHeaders();
+
+      // If overwrite requested, delete any existing conflicting A, AAAA, or CNAME records for this name first
+      if (overwrite) {
+        final existing = await getDnsRecordsForName(zoneId, subdomain);
+        for (final rec in existing) {
+          final t = (rec['type'] as String?)?.toUpperCase();
+          if (t == 'A' || t == 'AAAA' || t == 'CNAME') {
+            final recId = rec['id'] as String?;
+            if (recId != null) {
+              await deleteDnsRecord(zoneId, recId);
+            }
+          }
+        }
+      }
+
       final response = await http.post(
         Uri.parse('$baseUrl/zones/$zoneId/dns_records'),
         headers: headers,
