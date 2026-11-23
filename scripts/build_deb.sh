@@ -109,7 +109,7 @@ Section: net
 Priority: optional
 Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE
-Depends: libgtk-3-0 (>= 3.22), libwebkit2gtk-4.1-0 (>= 2.40), cloudflared
+Depends: libgtk-3-0 (>= 3.22), libwebkit2gtk-4.1-0 (>= 2.40), libayatana-appindicator3-1, libsecret-1-0, cloudflared
 Recommends: lsof, curl
 Maintainer: Cloudflare Manager Team
 Description: Cloudflare Tunnel Manager

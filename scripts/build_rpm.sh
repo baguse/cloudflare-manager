@@ -93,6 +93,8 @@ BuildArch:      $ARCH
 
 Requires:       gtk3 >= 3.22
 Requires:       webkit2gtk4.1 >= 2.40
+Requires:       libayatana-appindicator
+Requires:       libsecret
 Requires:       cloudflared
 Recommends:     lsof
 Recommends:     curl
