@@ -7,7 +7,9 @@ BUILD_DIR="$PROJECT_DIR/build/linux/x64/release/bundle"
 RPM_BUILD_ROOT="$HOME/rpmbuild"
 RPM_SOURCES="$RPM_BUILD_ROOT/SOURCES"
 RPM_DEPS_DIR="$RPM_SOURCES/cloudflare-manager-deps"
-VERSION=$(grep '^version:' "$PROJECT_DIR/pubspec.yaml" | awk '{print $2}' | tr -d '"')
+RAW_VERSION=$(grep '^version:' "$PROJECT_DIR/pubspec.yaml" | awk '{print $2}' | tr -d '"')
+VERSION=$(echo "$RAW_VERSION" | cut -d'+' -f1)
+BUILD_NUM=$(echo "$RAW_VERSION" | cut -sd'+' -f2 || echo "1")
 BINARY=$(grep '^name:' "$PROJECT_DIR/pubspec.yaml" | awk '{print $2}')
 NAME="cloudflare-manager"
 ARCH="x86_64"
@@ -81,7 +83,7 @@ SPEC_FILE="$RPM_BUILD_ROOT/SPECS/$NAME.spec"
 cat > "$SPEC_FILE" << SPEC
 Name:           $NAME
 Version:        $VERSION
-Release:        1%{?dist}
+Release:        ${BUILD_NUM:-1}%{?dist}
 Summary:        Cloudflare Zero Trust Tunnel Manager
 License:        MIT
 URL:            https://github.com/your-org/$NAME
@@ -160,7 +162,7 @@ tar -czf "$RPM_SOURCES/$NAME-deps.tar.gz" -C "$RPM_DEPS_DIR" .
 echo "=== Building RPM ==="
 rpmbuild -bb "$SPEC_FILE" --define "_topdir $RPM_BUILD_ROOT"
 
-RPM_GLOB="$RPM_BUILD_ROOT/RPMS/$ARCH/${NAME}-${VERSION}-1.*.rpm"
+RPM_GLOB="$RPM_BUILD_ROOT/RPMS/$ARCH/${NAME}-${VERSION}-*.rpm"
 RPM_FILE=$(ls $RPM_GLOB 2>/dev/null | head -1)
 
 if [ -n "$RPM_FILE" ] && [ -f "$RPM_FILE" ]; then
